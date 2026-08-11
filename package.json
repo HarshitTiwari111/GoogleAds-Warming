@@ -10,7 +10,8 @@
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix backend start",
     "seed:admin": "npm --prefix backend run seed:admin",
-    "seed:rules": "npm --prefix backend run seed:rules"
+    "seed:rules": "npm --prefix backend run seed:rules",
+    "build:deploy": "npm --prefix backend install --include=dev && npm --prefix frontend install --include=dev && npm --prefix frontend run build"
   },
   "engines": {
     "node": ">=18"

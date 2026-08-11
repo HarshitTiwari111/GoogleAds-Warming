@@ -1,0 +1,64 @@
+# Render Blueprint — one web service serving both the API and the built
+# frontend. In production backend/src/app.js serves frontend/dist, and the
+# frontend calls a relative /api, so there is no second service and no CORS
+# configuration to get wrong.
+#
+# To use: Render Dashboard -> New -> Blueprint -> pick this repo.
+# MONGODB_URI is deliberately not set here; add it in the dashboard so the
+# connection string never lives in the repo.
+services:
+  - type: web
+    name: googleads-warming
+    runtime: node
+    plan: free
+    branch: main
+
+    # --include=dev is required: Render applies NODE_ENV=production during the
+    # build too, and vite lives in devDependencies. Without it the frontend
+    # build fails with "vite: not found".
+    buildCommand: npm run build:deploy
+    startCommand: npm start
+
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render injects PORT; server.js reads it via config/env.js.
+
+      # Set in the dashboard — a MongoDB Atlas SRV string.
+      - key: MONGODB_URI
+        sync: false
+
+      # Generated once by Render and then kept. Changing either of these logs
+      # every user out.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+      # First-boot admin. Change the password immediately after signing in —
+      # there is no self-registration, so this is the only way in initially.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+
+      # Same-origin deploy: the frontend is served by this service, so the API
+      # only ever needs to allow its own URL.
+      - key: CORS_ORIGIN
+        fromService:
+          type: web
+          name: googleads-warming
+          property: host
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: googleads-warming
+          property: host
+
+      # Leave true until a Google Ads connection is configured; simulation
+      # mode never calls the real API.
+      - key: GOOGLE_ADS_SIMULATION_MODE
+        value: "true"
