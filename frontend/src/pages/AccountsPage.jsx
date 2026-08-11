@@ -216,7 +216,9 @@ export default function AccountsPage() {
     },
     {
       key: 'googleAdsCustomerId',
-      label: 'Google Ads ID',
+      // "Customer ID" is what Google calls this. Labelling it "Google Ads ID"
+      // on both pages made it look like it should equal a campaign's id.
+      label: 'Customer ID',
       sortable: true,
       render: (row) =>
         row.googleAdsCustomerId ? (

@@ -91,14 +91,23 @@ export default function CampaignsPage() {
           if (match) {
             localByGoogleId.delete(String(s.campaignId));
             // Local record wins on identity and settings; metrics come live.
-            return { ...match, ...metrics, status: match.status || String(s.status || '').toLowerCase() };
+            return {
+              ...match,
+              ...metrics,
+              status: match.status || String(s.status || '').toLowerCase(),
+              // Flattened for the table's sort and filter, which read row[key].
+              accountName: match.account?.accountName || s.accountName || '',
+            };
           }
 
           return {
             _id: `synced-${s.campaignId}`,
             campaignName: s.campaignName || `Campaign ${s.campaignId}`,
             googleCampaignId: s.campaignId,
-            account: s.accountName ? { accountName: s.accountName } : null,
+            // The ad account this campaign lives in. Its customer id is a
+            // different number from the campaign id above.
+            account: { accountName: s.accountName || '', googleAdsCustomerId: s.customerId },
+            accountName: s.accountName || '',
             status: String(s.status || 'unknown').toLowerCase(),
             dailyBudget: s.dailyBudget ?? 0,
             device: [],
@@ -109,7 +118,9 @@ export default function CampaignsPage() {
         });
 
         // Local campaigns not yet pushed to Google Ads.
-        const localOnly = local.filter((c) => !c.googleCampaignId || localByGoogleId.has(String(c.googleCampaignId)));
+        const localOnly = local
+          .filter((c) => !c.googleCampaignId || localByGoogleId.has(String(c.googleCampaignId)))
+          .map((c) => ({ ...c, accountName: c.account?.accountName || '' }));
 
         setCampaigns([...merged, ...localOnly]);
         setError(null);
@@ -194,9 +205,26 @@ export default function CampaignsPage() {
       filterable: true,
       render: (row) => <span style={{ fontWeight: 600 }}>{row.campaignName}</span>,
     },
+    // A campaign id and its account's customer id are different numbers, so
+    // both are shown and labelled for what they are — one column called
+    // "Google Ads ID" on each page read as though they should match.
+    {
+      key: 'accountName',
+      label: 'Account',
+      sortable: true,
+      filterable: true,
+      render: (row) => (
+        <div>
+          <div>{row.account?.accountName || <span className="cell-muted">—</span>}</div>
+          {row.account?.googleAdsCustomerId && (
+            <div className="cell-sub acct-id">{row.account.googleAdsCustomerId}</div>
+          )}
+        </div>
+      ),
+    },
     {
       key: 'googleCampaignId',
-      label: 'Google Ads ID',
+      label: 'Campaign ID',
       sortable: true,
       render: (row) =>
         row.googleCampaignId ? <span className="acct-id">{row.googleCampaignId}</span> : <span className="cell-muted">-</span>,

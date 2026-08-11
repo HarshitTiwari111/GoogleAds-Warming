@@ -350,7 +350,11 @@ exports.getAllCampaigns = async (req, res, next) => {
   try {
     // Admin sees every campaign; a user only those of their own MCC(s).
     const campaigns = await Campaign.find(await campaignScopeFilter(req.user))
-      .populate('account', 'accountName clientName status')
+      // googleAdsCustomerId is included so the Campaigns table can show which
+      // ad account each campaign belongs to — a campaign id and a customer id
+      // are different numbers, and without this the row shows no link between
+      // them.
+      .populate('account', 'accountName clientName status googleAdsCustomerId')
       .sort({ createdAt: -1 });
     res.json(campaigns);
   } catch (error) {
