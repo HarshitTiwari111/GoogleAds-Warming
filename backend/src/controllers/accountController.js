@@ -10,6 +10,7 @@ const AlertRules = require('../models/AlertRules');
 const googleAdsService = require('../services/googleAdsService');
 const campaignService = require('../services/campaignService');
 const { sendStatusChangeEmail, sendAccountCreatedEmail } = require('../services/emailService');
+const notificationService = require('../services/notificationService');
 const { logActivity } = require('../middleware/activityLogger');
 const env = require('../config/env');
 const logger = require('../utils/logger');
@@ -1050,8 +1051,14 @@ exports.createGoogleAdsAccount = async (req, res, next) => {
     });
 
     let message = 'Account created successfully!';
-    if (emailAddress && result.invited) message = 'Account created and invite sent!';
-    else if (emailAddress) message = 'Account created! Invite could not be sent.';
+    if (emailAddress && result.invited) {
+      message = `Account created and invite sent to ${emailAddress}!`;
+    } else if (emailAddress) {
+      // Say why. "Invite could not be sent" on its own left no way to tell a
+      // rejected address from a transient failure.
+      const reason = describeInviteError(result.inviteResponse?.error || 'unknown error', emailAddress);
+      message = `Account created, but the invite to ${emailAddress} failed — ${reason}`;
+    }
     if (result.campaignsCreatedCount > 0) {
       message += ` ${result.campaignsCreatedCount} warm-up campaign(s) live at ${result.campaignBudget}/day.`;
     }
@@ -1062,6 +1069,10 @@ exports.createGoogleAdsAccount = async (req, res, next) => {
       newCustomerId: result.newCustomerId,
       mccId: result.mccId,
       invited: result.invited,
+      // Structured so the UI can flag a failed invite rather than reporting
+      // the whole creation as a plain success.
+      inviteFailed: Boolean(emailAddress && !result.invited),
+      inviteError: result.inviteResponse?.error || null,
       inviteResponse: result.inviteResponse,
       campaignCreated: result.campaignCreated,
       account,
@@ -1100,6 +1111,9 @@ exports.bulkCreateGoogleAdsAccounts = async (req, res, next) => {
       let invited = 0;
       let totalCampaigns = 0;
       let failed = 0;
+      // A bulk run answers before it starts, so anything that goes wrong has
+      // to reach the operator some other way than the HTTP response.
+      const inviteErrors = [];
 
       for (let i = 1; i <= numAccounts; i++) {
         const accountName = `${namePrefix} ${i}`;
@@ -1119,6 +1133,9 @@ exports.bulkCreateGoogleAdsAccounts = async (req, res, next) => {
 
           created++;
           if (result.invited) invited++;
+          else if (emailAddress) {
+            inviteErrors.push(`${accountName}: ${result.inviteResponse?.error || 'unknown error'}`);
+          }
           totalCampaigns += result.campaignsCreatedCount || 0;
           logger.info(`Bulk: created "${accountName}" (${result.newCustomerId} @ MCC ${result.mccId}) — ${result.campaignsCreatedCount} campaign(s)${result.invited ? ' + invite' : ''}`);
         } catch (err) {
@@ -1130,6 +1147,23 @@ exports.bulkCreateGoogleAdsAccounts = async (req, res, next) => {
       }
 
       logger.info(`Bulk done: ${created} created, ${invited} invited, ${totalCampaigns} campaigns, ${failed} failed out of ${numAccounts}`);
+
+      // Report the outcome in-app. Without this a run where every invite was
+      // rejected looked identical to a fully successful one.
+      const summary = `${created}/${numAccounts} account(s) created, ${totalCampaigns} campaign(s)`;
+      if (inviteErrors.length || failed) {
+        const detail = inviteErrors.length
+          ? ` ${inviteErrors.length} invite(s) failed — ${describeInviteError(inviteErrors[0].split(': ').slice(1).join(': '), emailAddress)}`
+          : '';
+        await notificationService.create(
+          userId,
+          'Bulk account creation finished with problems',
+          `${summary}. ${failed} failed.${detail}`,
+          'error'
+        );
+      } else {
+        await notificationService.create(userId, 'Bulk account creation complete', summary, 'success');
+      }
     })();
   } catch (error) {
     next(error);

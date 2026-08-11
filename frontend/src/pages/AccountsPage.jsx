@@ -166,7 +166,9 @@ export default function AccountsPage() {
           showToast(res.message || `Creating ${count} accounts in the background…`);
         } else {
           const res = await accountsApi.createGoogleAdsAccount({ ...shared, accountName: form.accountName });
-          showToast(res.message || 'Account created');
+          // The account can be created while the invite is rejected — that is
+          // a partial success, not a success, so it must not look green.
+          showToast(res.message || 'Account created', res.inviteFailed ? 'error' : 'success');
         }
       }
 
