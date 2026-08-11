@@ -4,6 +4,7 @@ const GoogleAdsCache = require('../models/GoogleAdsCache');
 const googleAdsService = require('../services/googleAdsService');
 const env = require('../config/env');
 const { auditFromReq } = require('../utils/auditLogger');
+const logger = require('../utils/logger');
 
 /**
  * GET /api/settings/users-status - admin only: every user's Google Ads
@@ -173,12 +174,43 @@ exports.updateSettings = async (req, res, next) => {
   }
 };
 
+/**
+ * Where the OAuth proxy should send the user back to.
+ *
+ * Derived from the request itself, so a deployment works with no extra
+ * configuration and can never send a half-formed value: the proxy rejects
+ * anything that isn't an absolute origin, and a hosting platform that
+ * interpolates a service *name* rather than a URL into FRONTEND_URL produced
+ * exactly that failure.
+ *
+ * FRONTEND_URL stays supported as an explicit override for the case where the
+ * frontend is served from a different domain than the API, but it is only used
+ * when it is a full absolute URL.
+ */
+function resolveReturnUrl(req) {
+  const configured = (env.frontendUrl || '').trim();
+  if (/^https?:\/\/.+/i.test(configured)) {
+    return configured.replace(/\/+$/, '');
+  }
+
+  if (configured) {
+    logger.warn(
+      `[OAUTH] Ignoring FRONTEND_URL="${configured}" — it is not an absolute URL. ` +
+      'Using the request origin instead. Set it to something like https://your-app.example.com, or leave it unset.'
+    );
+  }
+
+  // `trust proxy` is enabled in app.js, so req.protocol reflects
+  // X-Forwarded-Proto and this stays https behind a platform load balancer.
+  return `${req.protocol}://${req.get('host')}`;
+}
+
 exports.generateAuthUrl = async (req, res, next) => {
   try {
-    const frontendUrl = env.frontendUrl;
-    const returnUrl = frontendUrl;
+    const returnUrl = resolveReturnUrl(req);
     const oauthBaseUrl = env.oauthProxyUrl || 'https://secure.dataram.workers.dev/auth/login';
     const url = `${oauthBaseUrl}?return_url=${encodeURIComponent(returnUrl)}`;
+    logger.info(`[OAUTH] Auth URL generated with return_url=${returnUrl}`);
     res.json({ url });
   } catch (error) {
     next(error);

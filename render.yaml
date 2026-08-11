@@ -45,18 +45,18 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
 
-      # Same-origin deploy: the frontend is served by this service, so the API
-      # only ever needs to allow its own URL.
+      # Same-origin deploy: this service serves the frontend too, so requests
+      # are never cross-origin and CORS has nothing to allow.
+      #
+      # FRONTEND_URL is deliberately NOT set. The OAuth return URL is derived
+      # from the incoming request, which is always correct here. `fromService`
+      # was tried and interpolates the service *name*, not a URL, which the
+      # OAuth proxy rejects as an invalid return URL.
+      #
+      # Only set FRONTEND_URL (to a full https://... URL) if the frontend is
+      # ever served from a different domain than this API.
       - key: CORS_ORIGIN
-        fromService:
-          type: web
-          name: googleads-warming
-          property: host
-      - key: FRONTEND_URL
-        fromService:
-          type: web
-          name: googleads-warming
-          property: host
+        value: "*"
 
       # Leave true until a Google Ads connection is configured; simulation
       # mode never calls the real API.
