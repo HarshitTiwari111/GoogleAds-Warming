@@ -19,6 +19,19 @@ const STATUS_OPTIONS = [
   { value: 'failed', label: 'Failed' },
 ];
 
+/**
+ * Google reports campaign state as ENABLED / PAUSED / REMOVED, while local
+ * records use this app's own vocabulary. Left untranslated, a synced campaign
+ * showed as "enabled" and the Active filter never matched it.
+ */
+const GOOGLE_STATUS = { ENABLED: 'active', PAUSED: 'paused', REMOVED: 'ended' };
+
+function normaliseStatus(status) {
+  if (!status) return 'unknown';
+  const upper = String(status).toUpperCase();
+  return GOOGLE_STATUS[upper] || String(status).toLowerCase();
+}
+
 const DEVICE_OPTIONS = [
   { value: 'all', label: 'All' },
   { value: 'mobile', label: 'Mobile' },
@@ -95,7 +108,7 @@ export default function CampaignsPage() {
             return {
               ...match,
               ...metrics,
-              status: match.status || String(s.status || '').toLowerCase(),
+              status: match.status || normaliseStatus(s.status),
               // Flattened for the table's sort and filter, which read row[key].
               accountName: match.account?.accountName || s.accountName || '',
             };
@@ -109,7 +122,7 @@ export default function CampaignsPage() {
             // different number from the campaign id above.
             account: { accountName: s.accountName || '', googleAdsCustomerId: s.customerId },
             accountName: s.accountName || '',
-            status: String(s.status || 'unknown').toLowerCase(),
+            status: normaliseStatus(s.status),
             dailyBudget: s.dailyBudget ?? 0,
             device: [],
             country: [],
@@ -204,6 +217,8 @@ export default function CampaignsPage() {
       label: 'Campaign Name',
       sortable: true,
       filterable: true,
+      filterPlaceholder: 'Search name or campaign ID...',
+      filterValue: (row) => [row.campaignName, row.googleCampaignId],
       render: (row) => <span style={{ fontWeight: 600 }}>{row.campaignName}</span>,
     },
     // A campaign id and its account's customer id are different numbers, so
@@ -214,6 +229,8 @@ export default function CampaignsPage() {
       label: 'Account',
       sortable: true,
       filterable: true,
+      filterPlaceholder: 'Search account or customer ID...',
+      filterValue: (row) => [row.accountName, row.account?.googleAdsCustomerId],
       render: (row) => (
         <div>
           <div>{row.account?.accountName || <span className="cell-muted">—</span>}</div>

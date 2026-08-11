@@ -213,6 +213,10 @@ export default function AccountsPage() {
       label: 'Name',
       sortable: true,
       filterable: true,
+      filterPlaceholder: 'Search name or customer ID...',
+      // One box searches both, since an operator has the customer id to hand
+      // as often as the name.
+      filterValue: (row) => [row.accountName, row.googleAdsCustomerId],
       render: (row) => <span style={{ fontWeight: 600 }}>{row.accountName}</span>,
     },
     {

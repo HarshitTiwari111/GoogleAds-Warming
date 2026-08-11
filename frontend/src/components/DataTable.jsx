@@ -48,9 +48,24 @@ export default function DataTable({
     for (const [key, value] of Object.entries(filters)) {
       if (!value) continue;
       const col = columns.find((c) => c.key === key);
+      const needle = value.toLowerCase();
+
       result = result.filter((row) => {
-        const cell = String(row[key] ?? '').toLowerCase();
-        return col?.filterType === 'select' ? cell === value.toLowerCase() : cell.includes(value.toLowerCase());
+        // A column may match on more than its own key — e.g. an account row
+        // searchable by name or customer id — via filterValue.
+        const raw = col?.filterValue ? col.filterValue(row) : row[key];
+
+        // Array cells (device, country) are matched per element. Stringifying
+        // them gave "mobile,desktop", which an exact select match never hit.
+        const candidates = (Array.isArray(raw) ? raw : [raw])
+          .filter((v) => v !== null && v !== undefined && v !== '')
+          .map((v) => String(v).toLowerCase());
+
+        if (!candidates.length) return false;
+
+        return col?.filterType === 'select'
+          ? candidates.some((c) => c === needle)
+          : candidates.some((c) => c.includes(needle));
       });
     }
 
@@ -116,7 +131,7 @@ export default function DataTable({
                   type="text"
                   value={filters[col.key] || ''}
                   onChange={(e) => setFilter(col.key, e.target.value)}
-                  placeholder={`Search ${col.label.toLowerCase()}...`}
+                  placeholder={col.filterPlaceholder || `Search ${col.label.toLowerCase()}...`}
                 />
               </div>
             )
