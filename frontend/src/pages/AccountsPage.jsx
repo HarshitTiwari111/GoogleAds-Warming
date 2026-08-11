@@ -5,6 +5,7 @@ import DataTable from '../components/DataTable';
 import AccountForm from '../components/AccountForm';
 import ConfirmModal from '../components/ConfirmModal';
 import { accountsApi, unwrap } from '../services/api';
+import { newestCreatedFirst } from '../utils/sortRows';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -101,7 +102,7 @@ export default function AccountsPage() {
         // Local records with no Google Ads id yet (drafts, failed provisions).
         const localOnly = local.filter((a) => !a.googleAdsCustomerId || localByCustomerId.has(String(a.googleAdsCustomerId)));
 
-        setAccounts([...merged, ...localOnly]);
+        setAccounts(newestCreatedFirst([...merged, ...localOnly]));
         setError(null);
       })
       .catch((err) => setError(err.response?.data?.message || err.message))

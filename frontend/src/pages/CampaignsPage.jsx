@@ -6,6 +6,7 @@ import DataTable from '../components/DataTable';
 import ConfirmModal from '../components/ConfirmModal';
 import BulkContentModal from '../components/BulkContentModal';
 import { campaignsApi, accountsApi, unwrap } from '../services/api';
+import { newestCreatedFirst } from '../utils/sortRows';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -122,7 +123,7 @@ export default function CampaignsPage() {
           .filter((c) => !c.googleCampaignId || localByGoogleId.has(String(c.googleCampaignId)))
           .map((c) => ({ ...c, accountName: c.account?.accountName || '' }));
 
-        setCampaigns([...merged, ...localOnly]);
+        setCampaigns(newestCreatedFirst([...merged, ...localOnly]));
         setError(null);
       })
       .catch((err) => setError(err.response?.data?.message || err.message))
