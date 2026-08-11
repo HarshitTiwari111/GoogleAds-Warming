@@ -33,6 +33,10 @@ export default function SettingsPage() {
   const [allUsers, setAllUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
+  const [manualToken, setManualToken] = useState('');
+  const [savingToken, setSavingToken] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+
   const checkConnection = () => {
     setLoading(true);
     return settingsApi
@@ -70,6 +74,39 @@ export default function SettingsPage() {
       })
       .catch(() => showToast('Failed to save token', 'error'));
   }, []);
+
+  // The direct Google flow redirects back here with the outcome in the query
+  // string, since the token exchange already happened server-side.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    const oauthError = params.get('oauth_error');
+    const connectedFlag = params.get('connected');
+    if (!oauthError && !connectedFlag) return;
+
+    if (oauthError) showToast(oauthError, 'error');
+    else {
+      showToast('Google Ads account connected successfully!');
+      checkConnection();
+    }
+    // Clear the params so a refresh doesn't replay the same toast.
+    window.history.replaceState(null, '', `${window.location.pathname}#/settings`);
+  }, []);
+
+  const handleSaveManualToken = async (e) => {
+    e.preventDefault();
+    setSavingToken(true);
+    try {
+      await settingsApi.saveToken({ refresh_token: manualToken.trim() });
+      showToast('Refresh token saved — Google Ads connected');
+      setManualToken('');
+      setShowManual(false);
+      checkConnection();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save the token', 'error');
+    } finally {
+      setSavingToken(false);
+    }
+  };
 
   useEffect(() => {
     checkConnection();
@@ -227,7 +264,36 @@ export default function SettingsPage() {
               Disconnect
             </button>
           )}
+
+          <button type="button" className="set-refresh-link" onClick={() => setShowManual((s) => !s)}>
+            {showManual ? 'Hide' : 'Paste a refresh token instead'}
+          </button>
         </div>
+
+        {/* Escape hatch for when the browser flow can't be used — e.g. the
+            shared OAuth proxy hasn't allowlisted this domain and no own
+            OAuth client is configured yet. */}
+        {showManual && (
+          <form className="set-box" style={{ marginTop: 16 }} onSubmit={handleSaveManualToken}>
+            <h3>Connect with an existing refresh token</h3>
+            <p className="set-hint" style={{ margin: '0 0 12px' }}>
+              Generate one at developers.google.com/oauthplayground for the scope{' '}
+              <code>https://www.googleapis.com/auth/adwords</code>, then paste it here.
+            </p>
+            <div className="set-mcc-add">
+              <input
+                type="text"
+                value={manualToken}
+                onChange={(e) => setManualToken(e.target.value)}
+                placeholder="1//0g..."
+                autoComplete="off"
+              />
+              <button type="submit" className="btn-primary" disabled={savingToken || !manualToken.trim()}>
+                {savingToken ? 'Saving…' : 'Save Token'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
 
       {isAdmin && (

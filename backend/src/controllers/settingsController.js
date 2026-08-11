@@ -187,6 +187,25 @@ exports.updateSettings = async (req, res, next) => {
  * frontend is served from a different domain than the API, but it is only used
  * when it is a full absolute URL.
  */
+/**
+ * This API's own origin, taken from the request.
+ *
+ * `trust proxy` is enabled in app.js, so req.protocol reflects
+ * X-Forwarded-Proto and this stays https behind a platform load balancer.
+ */
+function apiOrigin(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+/**
+ * Where to send the *user* once the flow finishes.
+ *
+ * Defaults to this service's own origin, which is correct for the normal
+ * deployment where the API also serves the frontend. FRONTEND_URL overrides
+ * it for a frontend on a separate domain, but only when it is a full absolute
+ * URL — a hosting platform that interpolates a service *name* instead of a URL
+ * produced exactly the malformed value the OAuth proxy rejected.
+ */
 function resolveReturnUrl(req) {
   const configured = (env.frontendUrl || '').trim();
   if (/^https?:\/\/.+/i.test(configured)) {
@@ -200,20 +219,133 @@ function resolveReturnUrl(req) {
     );
   }
 
-  // `trust proxy` is enabled in app.js, so req.protocol reflects
-  // X-Forwarded-Proto and this stays https behind a platform load balancer.
-  return `${req.protocol}://${req.get('host')}`;
+  return apiOrigin(req);
 }
 
+const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
+const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
+
+/**
+ * Where Google sends the browser back after consent. Always this API's own
+ * origin — the callback is an API route, so pointing it at a separately
+ * hosted frontend would land on a domain that doesn't serve /api. Google also
+ * requires an exact match against the registered redirect URI, so this must
+ * not vary with configuration.
+ */
+const oauthRedirectUri = (req) => `${apiOrigin(req)}/api/settings/oauth-callback`;
+
+/**
+ * GET /api/settings/oauth-url
+ *
+ * Prefers Google directly, using this deployment's own OAuth client. The
+ * shared proxy is only used when no client is configured, and it maintains
+ * its own allowlist of return URLs — a new deployment's domain is not on it,
+ * which surfaces as "Invalid Return URL. Only dashboard origin is allowed."
+ * Configuring GOOGLE_ADS_CLIENT_ID/SECRET removes that dependency entirely.
+ */
 exports.generateAuthUrl = async (req, res, next) => {
   try {
+    const { clientId } = env.googleAds;
+
+    if (clientId) {
+      // The redirect carries no auth header, so the caller's identity travels
+      // in a short-lived signed state parameter instead.
+      const state = jwt.sign({ id: req.user.id }, env.auth.jwtSecret, { expiresIn: '15m' });
+      const redirectUri = oauthRedirectUri(req);
+
+      const url = `${GOOGLE_AUTH_ENDPOINT}?${new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: GOOGLE_ADS_SCOPE,
+        // Both are required to be issued a refresh token, and `consent`
+        // forces a new one even for an already-approved account.
+        access_type: 'offline',
+        prompt: 'consent',
+        include_granted_scopes: 'true',
+        state,
+      })}`;
+
+      logger.info(`[OAUTH] Google consent URL generated, redirect_uri=${redirectUri}`);
+      return res.json({ url, mode: 'google' });
+    }
+
     const returnUrl = resolveReturnUrl(req);
     const oauthBaseUrl = env.oauthProxyUrl || 'https://secure.dataram.workers.dev/auth/login';
-    const url = `${oauthBaseUrl}?return_url=${encodeURIComponent(returnUrl)}`;
-    logger.info(`[OAUTH] Auth URL generated with return_url=${returnUrl}`);
-    res.json({ url });
+    logger.warn('[OAUTH] GOOGLE_ADS_CLIENT_ID is not set — falling back to the shared OAuth proxy, which only accepts allowlisted return URLs.');
+    res.json({
+      url: `${oauthBaseUrl}?return_url=${encodeURIComponent(returnUrl)}`,
+      mode: 'proxy',
+    });
   } catch (error) {
     next(error);
+  }
+};
+
+/**
+ * GET /api/settings/oauth-callback
+ *
+ * Public by necessity — Google redirects the browser here with no auth
+ * header. The signed `state` identifies the user, and the code is exchanged
+ * for a refresh token server-side so the secret never reaches the browser.
+ */
+exports.oauthCallback = async (req, res) => {
+  const settingsUrl = `${resolveReturnUrl(req)}/#/settings`;
+  const fail = (reason) => {
+    logger.error(`[OAUTH] Callback failed: ${reason}`);
+    return res.redirect(`${settingsUrl}?oauth_error=${encodeURIComponent(reason)}`);
+  };
+
+  try {
+    const { code, state, error: googleError } = req.query;
+    if (googleError) return fail(`Google returned "${googleError}"`);
+    if (!code || !state) return fail('Missing code or state');
+
+    let userId;
+    try {
+      ({ id: userId } = jwt.verify(state, env.auth.jwtSecret));
+    } catch {
+      return fail('The sign-in attempt expired — start again from Settings');
+    }
+
+    const { clientId, clientSecret } = env.googleAds;
+    if (!clientId || !clientSecret) return fail('GOOGLE_ADS_CLIENT_ID / GOOGLE_ADS_CLIENT_SECRET are not configured');
+
+    const tokenRes = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: oauthRedirectUri(req),
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    const payload = await tokenRes.json();
+    if (!tokenRes.ok) {
+      return fail(payload.error_description || payload.error || `Token exchange returned ${tokenRes.status}`);
+    }
+    if (!payload.refresh_token) {
+      // Google withholds it when the account already granted access and
+      // prompt=consent was not honoured.
+      return fail('Google did not return a refresh token — revoke this app at myaccount.google.com/permissions and try again');
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return fail('User not found');
+
+    if (!user.googleAdsConfig) user.googleAdsConfig = {};
+    user.googleAdsConfig.refreshToken = payload.refresh_token;
+    user.googleAdsConfig.isConfigured = true;
+    await user.save();
+
+    logger.info(`[OAUTH] Google Ads connected for user ${userId}`);
+    res.redirect(`${settingsUrl}?connected=1`);
+  } catch (error) {
+    fail(error.message);
   }
 };
 

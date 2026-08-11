@@ -10,6 +10,7 @@ const campaignRoutes = require('./campaignRoutes');
 const performanceRoutes = require('./performanceRoutes');
 const reportRoutes = require('./reportRoutes');
 const settingsRoutes = require('./settingsRoutes');
+const { oauthCallback } = require('../controllers/settingsController');
 const alertRoutes = require('./alertRoutes');
 const ruleRoutes = require('./ruleRoutes');
 const userRoutes = require('./userRoutes');
@@ -96,6 +97,11 @@ router.use('/dashboard', requireAuth, dashboardRoutes);
 router.use('/performance', requireAuth, performanceRoutes);
 router.use('/reports', requireAuth, reportRoutes);
 // Settings = each user's own Google Ads connection, so every user gets it.
+// Public by necessity: Google redirects the browser straight here with no
+// Authorization header. The caller is identified by the signed `state` the
+// consent URL carried, and the code exchange happens server-side.
+router.get('/settings/oauth-callback', oauthCallback);
+
 router.use('/settings', requireAuth, settingsRoutes);
 router.use('/alerts', requireAuth, alertRoutes);
 router.use('/rules', requireAuth, ruleRoutes);
