@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.local
+logs/
+*.log
+_src_gads/
+_src_warming/
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Runtime artifact written by scripts/runWithMemoryMongo.js
+backend/.mongo-uri

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Google Ads Automation</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Capture OAuth token from URL BEFORE React loads so it's never lost
+      (function() {
+        var p = new URLSearchParams(window.location.search);
+        var t = p.get('google_refresh_token') || p.get('refresh_token') || p.get('token');
+        if (!t && window.location.hash.indexOf('=') !== -1) {
+          // Fallback: proxy appended the token after the hash route,
+          // e.g. /#/settings?google_refresh_token=... - search misses it.
+          var hq = window.location.hash.split('?')[1] || '';
+          var hp = new URLSearchParams(hq);
+          t = hp.get('google_refresh_token') || hp.get('refresh_token') || hp.get('token');
+        }
+        if (t) {
+          sessionStorage.setItem('pending_google_token', t);
+          // Clean URL without reload
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      })();
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

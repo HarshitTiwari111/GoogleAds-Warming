@@ -1,0 +1,48 @@
+======================================
+  MongoDB Database Configuration
+======================================
+
+Connection URI:
+mongodb+srv://admin:dhscmcdhvfhd@cluster0.dux6ati.mongodb.net/warming-farming?retryWrites=true&w=majority&appName=Cluster0
+
+Database Name: warming-farming
+Cluster: cluster0.dux6ati.mongodb.net
+Username: admin
+Password: dhscmcdhvfhd
+
+Atlas IP Whitelist: 0.0.0.0/0 (Allow from anywhere)
+
+======================================
+  Admin Login Credentials
+======================================
+
+Email: admin@warmfarm.com
+Password: Admin@1234
+Role: admin
+
+======================================
+  Render Deployment URLs
+======================================
+
+Backend:  https://warmfarm-backend.onrender.com
+Frontend: https://warmfarm-frontend.onrender.com
+
+======================================
+  Environment Variables (Backend - Render)
+======================================
+
+PORT=5001
+MONGODB_URI=mongodb+srv://admin:dhscmcdhvfhd@cluster0.dux6ati.mongodb.net/warming-farming?retryWrites=true&w=majority&appName=Cluster0
+JWT_SECRET=wf-8k$2xR9!mPqZ7vL#nT4jY6hB3dF0gA5wE1cU
+JWT_EXPIRE=15m
+REFRESH_TOKEN_SECRET=wf-rT9$kX3!pMqW7vN#jZ4yH6bD0gF5aE1cU8sL
+REFRESH_TOKEN_EXPIRE=7d
+NODE_ENV=production
+CLIENT_URL=https://warmfarm-frontend.onrender.com
+COOKIE_SECURE=true
+
+======================================
+  Environment Variables (Frontend - Render)
+======================================
+
+VITE_API_URL=https://warmfarm-backend.onrender.com/api
