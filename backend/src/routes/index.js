@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const { requireAuth } = require('../middleware/auth');
 
 const authRoutes = require('./authRoutes');
@@ -26,7 +27,21 @@ const dashboardRoutes = require('./dashboardRoutes');
 
 const router = express.Router();
 
-router.get('/health', (req, res) => res.json({ success: true, message: 'OK', timestamp: new Date().toISOString() }));
+// Reports database reachability too: the server intentionally starts even
+// when Mongo is unreachable, so "the site loads" is not on its own proof that
+// the deployment is healthy.
+router.get('/health', (req, res) => {
+  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  const dbState = states[mongoose.connection.readyState] || 'unknown';
+  const dbOk = mongoose.connection.readyState === 1;
+
+  res.status(dbOk ? 200 : 503).json({
+    success: dbOk,
+    message: dbOk ? 'OK' : 'Database unavailable',
+    database: dbState,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Public routes: login/register, and the landing-page tracking pixel.
 router.use('/auth', authRoutes);

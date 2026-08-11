@@ -37,9 +37,21 @@ const connectDB = async (retries = 5) => {
       mongoose.connection.on('error', (err) => {
         logger.error(`MongoDB connection error: ${err.message}`);
       });
-      return;
+      return true;
     } catch (error) {
       logger.error(`MongoDB connection attempt ${attempt}/${retries} failed: ${error.message}`);
+
+      // "bad auth" is a credentials problem, not a transient one — retrying
+      // four more times just delays the real message by half a minute.
+      if (/bad auth|Authentication failed/i.test(error.message)) {
+        logger.error(
+          'MongoDB rejected the credentials. Check the username/password in MONGODB_URI, ' +
+          'that the database user exists in Atlas -> Database Access, and that any special ' +
+          'characters in the password are URL-encoded (@ -> %40, # -> %23, / -> %2F).'
+        );
+        return false;
+      }
+
       if (attempt < retries) {
         const waitSec = attempt * 3;
         logger.warn(`Retrying MongoDB connection in ${waitSec}s...`);
@@ -47,7 +59,9 @@ const connectDB = async (retries = 5) => {
       }
     }
   }
-  logger.error('Server will continue without DB. Fix MONGODB_URI in .env and restart.');
+
+  logger.error('Could not reach MongoDB. The server will still start so logs and /api/health stay reachable, but every request that touches the database will fail.');
+  return false;
 };
 
 module.exports = connectDB;
