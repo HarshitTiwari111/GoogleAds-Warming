@@ -4,6 +4,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
+import GoogleTokenCatcher from './components/GoogleTokenCatcher';
 
 import Login from './pages/Login';
 import DashboardPage from './pages/DashboardPage';
@@ -33,6 +34,9 @@ export default function App() {
       <ToastProvider>
         <HashRouter>
           <AuthProvider>
+            {/* Catches a refresh token the OAuth proxy appends to the URL,
+                whichever route it drops the user on. */}
+            <GoogleTokenCatcher />
             <Routes>
               <Route path="/login" element={<Login />} />
 
