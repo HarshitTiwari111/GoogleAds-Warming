@@ -93,14 +93,27 @@ async function listAccessibleCustomers(refreshToken) {
   return resourceNames.map((rn) => rn.replace('customers/', ''));
 }
 
+/**
+ * The client accounts sitting under a manager account.
+ *
+ * `login-customer-id` must be the manager itself — querying customer_client
+ * without it returns nothing, which made every MCC look empty and left the
+ * sync recording each one as a bare "manager" with no clients.
+ */
 async function fetchClientAccounts(mccId, refreshToken) {
-  const query = `SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.status FROM customer_client WHERE customer_client.level <= 1`;
-  const rows = await workerQuery(mccId, query, refreshToken);
+  const query = `SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.status, customer_client.level FROM customer_client WHERE customer_client.level <= 1`;
+  const rows = await workerQuery(mccId, query, refreshToken, mccId);
+
   return rows
-    .filter((r) => r.customerClient && !r.customerClient.manager && r.customerClient.status === 'ENABLED')
+    .filter((r) => {
+      const c = r.customerClient;
+      // Skip the manager itself (level 0) and any nested managers — only real
+      // ad-serving accounts belong in the account list.
+      return c && !c.manager && String(c.id) !== String(mccId) && c.status === 'ENABLED';
+    })
     .map((r) => ({
       customerId: String(r.customerClient.id),
-      name: r.customerClient.descriptiveName || '',
+      name: r.customerClient.descriptiveName || `Account ${r.customerClient.id}`,
     }));
 }
 

@@ -52,12 +52,66 @@ export default function CampaignsPage() {
   const [showBulk, setShowBulk] = useState(false);
   const [applying, setApplying] = useState(false);
 
+  /**
+   * Campaigns come from two places:
+   *  - the synced Google Ads snapshot, i.e. everything under the linked
+   *    MCC(s), with live metrics,
+   *  - local Campaign records, which own the keywords, ad copies and budget
+   *    edited in this app.
+   *
+   * Merged on the Google Ads campaign id so a campaign created here shows once
+   * — with its local id, so the Ads/Keywords buttons still resolve — carrying
+   * the freshly synced metrics.
+   */
   const load = useCallback(() => {
     setLoading(true);
-    return campaignsApi
-      .list()
-      .then((res) => {
-        setCampaigns(unwrap(res) || []);
+    return Promise.all([
+      accountsApi.syncedCampaigns().catch(() => ({ data: [] })),
+      campaignsApi.list().catch(() => []),
+    ])
+      .then(([syncedRes, localRes]) => {
+        const synced = unwrap(syncedRes) || [];
+        const local = unwrap(localRes) || [];
+
+        const localByGoogleId = new Map(
+          local.filter((c) => c.googleCampaignId).map((c) => [String(c.googleCampaignId), c])
+        );
+
+        const merged = synced.map((s) => {
+          const match = localByGoogleId.get(String(s.campaignId));
+          const metrics = {
+            clicks: s.clicks ?? 0,
+            impressions: s.impressions ?? 0,
+            ctr: s.ctr ?? 0,
+            spend: s.spend ?? 0,
+            cpc: s.cpc ?? 0,
+            conversions: s.conversions ?? 0,
+          };
+
+          if (match) {
+            localByGoogleId.delete(String(s.campaignId));
+            // Local record wins on identity and settings; metrics come live.
+            return { ...match, ...metrics, status: match.status || String(s.status || '').toLowerCase() };
+          }
+
+          return {
+            _id: `synced-${s.campaignId}`,
+            campaignName: s.campaignName || `Campaign ${s.campaignId}`,
+            googleCampaignId: s.campaignId,
+            account: s.accountName ? { accountName: s.accountName } : null,
+            status: String(s.status || 'unknown').toLowerCase(),
+            dailyBudget: s.dailyBudget ?? 0,
+            device: [],
+            country: [],
+            ...metrics,
+            syncedOnly: true,
+          };
+        });
+
+        // Local campaigns not yet pushed to Google Ads.
+        const localOnly = local.filter((c) => !c.googleCampaignId || localByGoogleId.has(String(c.googleCampaignId)));
+
+        setCampaigns([...merged, ...localOnly]);
         setError(null);
       })
       .catch((err) => setError(err.response?.data?.message || err.message))
@@ -96,9 +150,23 @@ export default function CampaignsPage() {
   const selectedCampaigns = campaigns.filter((c) => selectedIds.includes(c._id));
 
   const handleBulkApply = async ({ keywords, ads }) => {
+    // Synced-only rows carry a synthetic id and no local record to attach
+    // keywords or ad copies to. Sending those would fail the whole batch on an
+    // invalid id, so they are dropped here and reported.
+    const localIds = selectedCampaigns.filter((c) => !c.syncedOnly).map((c) => c._id);
+    const skippedSynced = selectedIds.length - localIds.length;
+
+    if (!localIds.length) {
+      showToast('None of the selected campaigns were created here — manage those in the Google Ads view', 'error');
+      return;
+    }
+
     setApplying(true);
     try {
-      const res = await campaignsApi.bulkAddContent(selectedIds, { keywords, ads });
+      const res = await campaignsApi.bulkAddContent(localIds, { keywords, ads });
+      if (skippedSynced) {
+        showToast(`${skippedSynced} synced-only campaign(s) skipped`, 'error');
+      }
       const d = res.data || {};
       showToast(res.message || 'Applied to the selected campaigns');
 
@@ -163,23 +231,36 @@ export default function CampaignsPage() {
       render: (row) => (row.country?.length ? row.country.join(', ') : '-'),
     },
     { key: 'dailyBudget', label: 'Daily Budget', sortable: true, render: (row) => `$${row.dailyBudget ?? 0}` },
+    // Ad copies and keywords are stored against a local Campaign record. A
+    // campaign that only exists in the synced snapshot has none, so these
+    // point at the live Google Ads view instead of a dead local route.
     {
       key: 'ads',
       label: 'Ad Copy',
-      render: (row) => (
-        <button className="camp-cell-btn camp-cell-btn-ads" onClick={() => navigate(`/campaigns/${row._id}/ads`)}>
-          <Megaphone size={13} /> Ads
-        </button>
-      ),
+      render: (row) =>
+        row.syncedOnly ? (
+          <button className="camp-cell-btn" onClick={() => navigate('/campaigns/google-ads')} title="Manage in the live Google Ads view">
+            <Megaphone size={13} /> View
+          </button>
+        ) : (
+          <button className="camp-cell-btn camp-cell-btn-ads" onClick={() => navigate(`/campaigns/${row._id}/ads`)}>
+            <Megaphone size={13} /> Ads
+          </button>
+        ),
     },
     {
       key: 'keywords',
       label: 'Keywords',
-      render: (row) => (
-        <button className="camp-cell-btn camp-cell-btn-keyword" onClick={() => navigate(`/campaigns/${row._id}/keywords`)}>
-          <Key size={13} /> Keywords
-        </button>
-      ),
+      render: (row) =>
+        row.syncedOnly ? (
+          <button className="camp-cell-btn" onClick={() => navigate('/campaigns/google-ads')} title="Manage in the live Google Ads view">
+            <Key size={13} /> View
+          </button>
+        ) : (
+          <button className="camp-cell-btn camp-cell-btn-keyword" onClick={() => navigate(`/campaigns/${row._id}/keywords`)}>
+            <Key size={13} /> Keywords
+          </button>
+        ),
     },
     ...(isAdmin
       ? [{
@@ -196,6 +277,8 @@ export default function CampaignsPage() {
         <button
           className="camp-action-btn camp-action-delete"
           onClick={() => setPendingDelete(row)}
+          disabled={row.syncedOnly}
+          title={row.syncedOnly ? 'Only synced from Google Ads — nothing local to delete' : 'Delete'}
           aria-label={`Delete ${row.campaignName}`}
         >
           <Trash2 size={15} />

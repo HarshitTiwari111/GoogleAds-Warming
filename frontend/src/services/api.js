@@ -115,6 +115,8 @@ export const accountsApi = {
   stats: () => api.get('/accounts/stats').then((res) => res.data),
   list: (params) => api.get('/accounts', { params }).then((res) => res.data),
   googleAds: () => api.get('/accounts/google-ads').then((res) => res.data),
+  /** Every campaign from the synced snapshot, across all linked accounts. */
+  syncedCampaigns: () => api.get('/accounts/google-ads/campaigns').then((res) => res.data),
   googleAdsCampaigns: (customerId, mccId) => api.get(`/accounts/google-ads/${customerId}/campaigns`, { params: mccId ? { mccId } : {} }).then((res) => res.data),
   campaignDevices: (customerId, campaignId, mccId) => api.get(`/accounts/google-ads/${customerId}/campaigns/${campaignId}/devices`, { params: mccId ? { mccId } : {} }).then((res) => res.data),
   campaignGeo: (customerId, campaignId, mccId) => api.get(`/accounts/google-ads/${customerId}/campaigns/${campaignId}/geo`, { params: mccId ? { mccId } : {} }).then((res) => res.data),

@@ -437,6 +437,34 @@ exports.getGoogleAdsAccounts = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/accounts/google-ads/campaigns
+ *
+ * Every campaign from the synced snapshot, across all of the caller's linked
+ * accounts. The per-account live fetch already existed, but nothing exposed
+ * the whole cached set, so the Campaigns page had no way to show the campaigns
+ * that actually belong to the linked MCC.
+ */
+exports.getSyncedCampaigns = async (req, res, next) => {
+  try {
+    if (req.user.role === 'admin') {
+      const merged = await getMergedCache('campaigns');
+      return res.json({ data: merged.data, lastSynced: merged.lastSynced });
+    }
+
+    // A disconnected user's leftover cache must not show as live data.
+    const me = await User.findById(req.user.id).select('googleAdsConfig');
+    if (!me?.googleAdsConfig?.refreshToken) {
+      return res.json({ data: [], lastSynced: null, message: 'Google Ads not connected. Connect from Settings.' });
+    }
+
+    const cached = await GoogleAdsCache.findOne({ userId: req.user.id, type: 'campaigns' });
+    return res.json({ data: cached?.data || [], lastSynced: cached?.lastSynced || null });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getGoogleAdsCampaigns = async (req, res, next) => {
   try {
     const { customerId } = req.params;

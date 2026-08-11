@@ -54,12 +54,54 @@ export default function AccountsPage() {
 
   const [pendingDelete, setPendingDelete] = useState(null);
 
+  /**
+   * Accounts come from two places and both matter:
+   *  - the synced Google Ads snapshot, which is everything under the linked
+   *    MCC(s) — the bulk of the list, and the reason this page exists,
+   *  - the local Account records, which carry the operator-set billing budget,
+   *    timezone, status and invite email that Google doesn't store for us.
+   *
+   * They are merged on the Google Ads customer id so an account provisioned
+   * here appears once, with its local settings, rather than twice.
+   */
   const loadAccounts = useCallback(() => {
     setLoading(true);
-    return accountsApi
-      .list()
-      .then((res) => {
-        setAccounts(unwrap(res) || []);
+    return Promise.all([
+      accountsApi.googleAds().catch(() => ({ data: [] })),
+      accountsApi.list().catch(() => []),
+    ])
+      .then(([syncedRes, localRes]) => {
+        const synced = (unwrap(syncedRes) || []).filter((a) => !a.isManager);
+        const local = unwrap(localRes) || [];
+
+        const localByCustomerId = new Map(
+          local.filter((a) => a.googleAdsCustomerId).map((a) => [String(a.googleAdsCustomerId), a])
+        );
+
+        const merged = synced.map((s) => {
+          const match = localByCustomerId.get(String(s.customerId));
+          if (match) {
+            localByCustomerId.delete(String(s.customerId));
+            return { ...match, sourceMccId: match.sourceMccId || s.managerAccountId };
+          }
+          // Synced-only: no local record, so the operator-set fields are blank.
+          return {
+            _id: `synced-${s.customerId}`,
+            accountName: s.name || `Account ${s.customerId}`,
+            googleAdsCustomerId: s.customerId,
+            sourceMccId: s.managerAccountId || null,
+            currency: s.currency || '—',
+            timeZone: s.timeZone || '—',
+            billingBudget: null,
+            status: 'active',
+            syncedOnly: true,
+          };
+        });
+
+        // Local records with no Google Ads id yet (drafts, failed provisions).
+        const localOnly = local.filter((a) => !a.googleAdsCustomerId || localByCustomerId.has(String(a.googleAdsCustomerId)));
+
+        setAccounts([...merged, ...localOnly]);
         setError(null);
       })
       .catch((err) => setError(err.response?.data?.message || err.message))
@@ -195,7 +237,9 @@ export default function AccountsPage() {
       key: 'billingBudget',
       label: 'Billing Budget',
       sortable: true,
-      render: (row) => `$${row.billingBudget ?? 0}`,
+      // Blank for accounts that exist only in Google Ads — the billing budget
+      // is a local setting, so showing $0 would misreport them as capped.
+      render: (row) => (row.billingBudget == null ? <span className="cell-muted">—</span> : `$${row.billingBudget}`),
     },
     { key: 'timeZone', label: 'Timezone', sortable: true },
     {
@@ -219,12 +263,17 @@ export default function AccountsPage() {
     {
       key: 'actions',
       label: 'Actions',
+      // Edit and delete act on a local record. An account that exists only in
+      // the synced snapshot has none, so those are disabled rather than
+      // failing on a synthetic id. Inviting still works — it goes to Google
+      // by customer id.
       render: (row) => (
         <div className="cell-actions">
           <button
             className="camp-action-btn"
             onClick={() => { setInviteTarget(row); setInviteEmail(row.inviteEmail || ''); }}
-            title="Send Google Ads access invitation"
+            disabled={row.syncedOnly}
+            title={row.syncedOnly ? 'Create this account here to manage invites' : 'Send Google Ads access invitation'}
             aria-label={`Invite for ${row.accountName}`}
           >
             <Mail size={15} />
@@ -232,6 +281,8 @@ export default function AccountsPage() {
           <button
             className="camp-action-btn camp-action-edit"
             onClick={() => { setEditing(row); setShowForm(true); }}
+            disabled={row.syncedOnly}
+            title={row.syncedOnly ? 'Only synced from Google Ads — nothing local to edit' : 'Edit'}
             aria-label={`Edit ${row.accountName}`}
           >
             <Pencil size={15} />
@@ -239,6 +290,8 @@ export default function AccountsPage() {
           <button
             className="camp-action-btn camp-action-delete"
             onClick={() => setPendingDelete(row)}
+            disabled={row.syncedOnly}
+            title={row.syncedOnly ? 'Only synced from Google Ads — nothing local to delete' : 'Delete'}
             aria-label={`Delete ${row.accountName}`}
           >
             <Trash2 size={15} />

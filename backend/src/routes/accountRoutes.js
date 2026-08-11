@@ -12,6 +12,7 @@ const {
   syncAccount,
   getGoogleAdsAccounts,
   getGoogleAdsCampaigns,
+  getSyncedCampaigns,
   getCampaignDevicePerformance,
   getCampaignGeoPerformance,
   getCampaignAdCopies,
@@ -33,6 +34,8 @@ const {
 
 router.get('/stats', getDashboardStats);
 router.get('/google-ads', getGoogleAdsAccounts);
+// Declared before /google-ads/:customerId/... so "campaigns" is not parsed as a customer id.
+router.get('/google-ads/campaigns', getSyncedCampaigns);
 router.get('/google-ads/:customerId/campaigns', validators.accounts.customerParam, validate, getGoogleAdsCampaigns);
 router.get('/google-ads/:customerId/campaigns/:campaignId/devices', validators.accounts.campaignParam, validate, getCampaignDevicePerformance);
 router.get('/google-ads/:customerId/campaigns/:campaignId/geo', validators.accounts.campaignParam, validate, getCampaignGeoPerformance);
