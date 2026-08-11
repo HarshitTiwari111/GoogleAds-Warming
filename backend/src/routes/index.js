@@ -27,18 +27,42 @@ const dashboardRoutes = require('./dashboardRoutes');
 
 const router = express.Router();
 
-// Reports database reachability too: the server intentionally starts even
-// when Mongo is unreachable, so "the site loads" is not on its own proof that
-// the deployment is healthy.
-router.get('/health', (req, res) => {
-  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
-  const dbState = states[mongoose.connection.readyState] || 'unknown';
-  const dbOk = mongoose.connection.readyState === 1;
+const DB_STATES = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+const dbStatus = () => ({
+  state: DB_STATES[mongoose.connection.readyState] || 'unknown',
+  ok: mongoose.connection.readyState === 1,
+});
 
-  res.status(dbOk ? 200 : 503).json({
-    success: dbOk,
-    message: dbOk ? 'OK' : 'Database unavailable',
-    database: dbState,
+/**
+ * Liveness — "the process is up". Always 200 so a platform health check marks
+ * the deploy live and its logs and this endpoint stay reachable.
+ *
+ * Deliberately not tied to the database: gating this on Mongo means a bad
+ * MONGODB_URI leaves the deploy hanging on the health check forever, which
+ * hides the very error you need to read. The `database` field reports the
+ * real state instead.
+ */
+router.get('/health', (req, res) => {
+  const db = dbStatus();
+  res.json({
+    success: true,
+    message: db.ok ? 'OK' : 'Running, but the database is unreachable',
+    database: db.state,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * Readiness — "the app can actually serve data". 503 while the database is
+ * down. Use this one for load-balancer routing decisions, not for the
+ * platform's deploy gate.
+ */
+router.get('/health/ready', (req, res) => {
+  const db = dbStatus();
+  res.status(db.ok ? 200 : 503).json({
+    success: db.ok,
+    message: db.ok ? 'Ready' : 'Database unavailable',
+    database: db.state,
     timestamp: new Date().toISOString(),
   });
 });
