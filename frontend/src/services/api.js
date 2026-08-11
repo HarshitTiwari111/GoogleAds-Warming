@@ -126,6 +126,18 @@ export const accountsApi = {
   mutateKeyword: (customerId, adGroupId, criterionId, action, mccId, updates) => api.post(`/accounts/google-ads/${customerId}/adgroups/${adGroupId}/criteria/${criterionId}/mutate`, { action, updates }, { params: mccId ? { mccId } : {} }).then((res) => res.data),
   mutateAd: (customerId, adGroupId, adId, action, mccId, updates) => api.post(`/accounts/google-ads/${customerId}/adgroups/${adGroupId}/ads/${adId}/mutate`, { action, updates }, { params: mccId ? { mccId } : {} }).then((res) => res.data),
   mutateDeviceBid: (customerId, campaignId, deviceType, bidModifier, mccId, action) => api.post(`/accounts/google-ads/${customerId}/campaigns/${campaignId}/device-bid`, { deviceType, bidModifier, action }, { params: mccId ? { mccId } : {} }).then((res) => res.data),
+  // Search terms report, and excluding a term at campaign level.
+  searchTerms: (customerId, { mccId, campaignId, days } = {}) =>
+    api.get(`/accounts/google-ads/${customerId}/search-terms`, {
+      params: { ...(mccId && { mccId }), ...(campaignId && { campaignId }), ...(days && { days }) },
+    }).then((res) => res.data),
+  addNegativeKeywords: (customerId, campaignId, keywords, mccId) =>
+    api.post(
+      `/accounts/google-ads/${customerId}/campaigns/${campaignId}/negative-keywords`,
+      { keywords },
+      { params: mccId ? { mccId } : {} }
+    ).then((res) => res.data),
+
   syncGoogleAds: () => api.post('/accounts/google-ads/sync').then((res) => res.data),
   createGoogleAdsAccount: (data) => api.post('/accounts/google-ads/create', data).then((res) => res.data),
   bulkCreateGoogleAdsAccounts: (data) => api.post('/accounts/google-ads/bulk-create', data).then((res) => res.data),

@@ -19,6 +19,8 @@ const {
   getCampaignDemographics,
   getCampaignExclusions,
   getCampaignKeywords,
+  getSearchTerms,
+  addNegativeKeywords,
   mutateCampaignKeyword,
   mutateCampaignAd,
   mutateCampaignDevice,
@@ -39,6 +41,10 @@ router.get('/google-ads/:customerId/campaigns/:campaignId/audience', validators.
 router.get('/google-ads/:customerId/campaigns/:campaignId/demographics', validators.accounts.campaignParam, validate, getCampaignDemographics);
 router.get('/google-ads/:customerId/campaigns/:campaignId/exclusions', validators.accounts.campaignParam, validate, getCampaignExclusions);
 router.get('/google-ads/:customerId/campaigns/:campaignId/keywords', validators.accounts.campaignParam, validate, getCampaignKeywords);
+// Search terms report, and turning a wasteful term into a campaign-level
+// negative keyword.
+router.get('/google-ads/:customerId/search-terms', validators.accounts.customerParam, validate, getSearchTerms);
+router.post('/google-ads/:customerId/campaigns/:campaignId/negative-keywords', validators.accounts.campaignParam, validate, addNegativeKeywords);
 // All operations below act on the caller's own data (their own accounts,
 // their own Google Ads connection/cache), so every authenticated user may
 // use them - admins additionally see everyone's data inside the controllers.

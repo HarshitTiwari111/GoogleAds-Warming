@@ -3,6 +3,7 @@ import { RefreshCw, Search, Monitor, Smartphone, Tablet, Globe, X, MapPin, Megap
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
+import SearchTermsModal from '../components/SearchTermsModal';
 import { accountsApi } from '../services/api';
 import { useToast } from '../context/ToastContext';
 
@@ -667,6 +668,7 @@ export default function GoogleAdsCampaignsPage() {
   const [adsModal, setAdsModal] = useState(null);
   const [deviceModal, setDeviceModal] = useState(null);
   const [keywordsModal, setKeywordsModal] = useState(null);
+  const [searchTermsModal, setSearchTermsModal] = useState(null);
 
   useEffect(() => {
     accountsApi
@@ -823,6 +825,7 @@ export default function GoogleAdsCampaignsPage() {
                       <th>Device</th>
                       <th>Ads</th>
                       <th>Keywords</th>
+                      <th>Search Terms</th>
                       <th>Country</th>
                     </tr>
                   </thead>
@@ -872,6 +875,17 @@ export default function GoogleAdsCampaignsPage() {
                             >
                               <Key size={13} />
                               <span>{ext?.keywords?.length ? `${ext.keywords.length} Keywords` : '—'}</span>
+                            </button>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="camp-cell-btn"
+                              onClick={() => setSearchTermsModal({ name: c.campaignName, campaignId: c.campaignId })}
+                              title="What people actually searched"
+                            >
+                              <Search size={13} />
+                              <span>Terms</span>
                             </button>
                           </td>
                           <td>
@@ -959,6 +973,16 @@ export default function GoogleAdsCampaignsPage() {
             const old = prev[keywordsModal.campaignId] || {};
             return { ...prev, [keywordsModal.campaignId]: { ...old, keywords: updater(old.keywords || []) } };
           })}
+        />
+      )}
+
+      {searchTermsModal && (
+        <SearchTermsModal
+          customerId={selectedAccount?.customerId}
+          mccId={selectedAccount?.managerAccountId}
+          campaignId={searchTermsModal.campaignId}
+          campaignName={searchTermsModal.name}
+          onClose={() => setSearchTermsModal(null)}
         />
       )}
     </div>

@@ -319,6 +319,107 @@ async function workerMutate(customerId, operations, refreshToken, loginCustomerI
   return response.json();
 }
 
+/**
+ * POST .../googleAds:searchStream — the streaming counterpart of
+ * googleAds:search, used for reports that can run long (search terms over a
+ * date range).
+ *
+ * Unlike :search, the response is an ARRAY of chunks, each with its own
+ * `results`. Treating it like :search silently yields nothing, so the chunks
+ * are flattened here. A single object is also accepted, since the proxy
+ * collapses one-chunk responses.
+ */
+async function workerSearchStream(customerId, query, refreshToken, loginCustomerId) {
+  const url = `${WORKER_BASE}/customers/${customerId}/googleAds:searchStream`;
+  const headers = {
+    'x-user-refresh-token': refreshToken,
+    'Content-Type': 'application/json',
+  };
+  if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
+
+  const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ query }) });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`searchStream ${response.status}: ${text.substring(0, 500)}`);
+  }
+
+  const data = await response.json();
+  const chunks = Array.isArray(data) ? data : [data];
+  return chunks.flatMap((chunk) => chunk?.results || []);
+}
+
+/**
+ * Search terms an account actually served against, with their metrics — the
+ * report used to spot wasted spend and turn it into negative keywords.
+ */
+async function fetchSearchTerms(customerId, refreshToken, loginCustomerId, { days = 30, campaignId = null } = {}) {
+  const window = `LAST_${[7, 14, 30].includes(Number(days)) ? days : 30}_DAYS`;
+  const scope = campaignId ? ` AND campaign.id = ${Number(campaignId)}` : '';
+
+  const query =
+    'SELECT search_term_view.search_term, campaign.id, campaign.name, ad_group.id, ad_group.name, ' +
+    'metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions ' +
+    `FROM search_term_view WHERE segments.date DURING ${window}${scope} ` +
+    'ORDER BY metrics.cost_micros DESC LIMIT 500';
+
+  const rows = await workerSearchStream(customerId, query, refreshToken, loginCustomerId);
+
+  return rows.map((r) => ({
+    searchTerm: r.searchTermView?.searchTerm || '',
+    campaignId: String(r.campaign?.id || ''),
+    campaignName: r.campaign?.name || '',
+    adGroupId: String(r.adGroup?.id || ''),
+    adGroupName: r.adGroup?.name || '',
+    clicks: Number(r.metrics?.clicks || 0),
+    impressions: Number(r.metrics?.impressions || 0),
+    cost: Number(r.metrics?.costMicros || r.metrics?.cost_micros || 0) / 1_000_000,
+    conversions: Number(r.metrics?.conversions || 0),
+  }));
+}
+
+/**
+ * Add campaign-level negative keywords via campaignCriteria:mutate.
+ *
+ * Campaign level (not ad group) so one exclusion covers every ad group in the
+ * campaign, which is what excluding a wasteful search term should do.
+ */
+async function addNegativeKeywords(customerId, campaignId, keywords, refreshToken, loginCustomerId) {
+  const url = `${WORKER_BASE}/customers/${customerId}/campaignCriteria:mutate`;
+  const headers = {
+    'x-user-refresh-token': refreshToken,
+    'Content-Type': 'application/json',
+  };
+  if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
+
+  const operations = keywords.map(({ text, matchType }) => ({
+    create: {
+      campaign: `customers/${customerId}/campaigns/${campaignId}`,
+      negative: true,
+      keyword: { text, matchType: (matchType || 'EXACT').toUpperCase() },
+    },
+  }));
+
+  const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ operations }) });
+  const text = await response.text();
+
+  if (!response.ok) {
+    // Surface Google's human-readable reason rather than the raw envelope.
+    let reason = '';
+    try {
+      const parsed = JSON.parse(text);
+      reason = parsed?.error?.details?.[0]?.errors?.[0]?.message || parsed?.error?.message || '';
+    } catch { /* non-JSON body */ }
+    throw new Error(reason || `campaignCriteria:mutate ${response.status}: ${text.substring(0, 500)}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
 async function getMccBillingInfo(mccId, refreshToken) {
   const query = `SELECT billing_setup.id, billing_setup.payments_account, billing_setup.payments_account_info.payments_account_id, billing_setup.payments_account_info.payments_profile_id, billing_setup.status FROM billing_setup WHERE billing_setup.status = 'APPROVED' LIMIT 1`;
   const rows = await workerQuery(mccId, query, refreshToken);
@@ -697,6 +798,11 @@ const googleAdsService = {
   generateMockMetrics,
   sendAccountInvite,
   setupBillingForClient,
+
+  // Search terms report + campaign-level negative keywords
+  workerSearchStream,
+  fetchSearchTerms,
+  addNegativeKeywords,
 
   // Multi-MCC + billing
   NO_MCC_MESSAGE,

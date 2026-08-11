@@ -550,6 +550,80 @@ const NUMERIC_ID = /^\d+$/;
 const VALID_ACTIONS = ['edit', 'remove', 'pause', 'enable'];
 const VALID_DEVICE_TYPES = ['MOBILE', 'DESKTOP', 'TABLET', 'CONNECTED_TV'];
 
+/**
+ * GET /api/accounts/google-ads/:customerId/search-terms
+ *
+ * The search terms an account actually served against. Optionally narrowed to
+ * one campaign via ?campaignId=, and to a window via ?days= (7/14/30).
+ */
+exports.getSearchTerms = async (req, res, next) => {
+  try {
+    const { customerId } = req.params;
+    const { campaignId, days } = req.query;
+    if (campaignId && !NUMERIC_ID.test(campaignId)) {
+      return res.status(400).json({ message: 'Invalid campaign ID' });
+    }
+
+    const rawMcc = req.query.mccId;
+    const mccId = rawMcc && rawMcc !== 'null' && rawMcc !== 'undefined' ? rawMcc : null;
+    const refreshToken = await resolveRefreshTokenForCustomer(req.user, customerId);
+    if (!refreshToken) return res.status(400).json({ message: 'Google Ads not connected.' });
+
+    const data = await googleAdsService.fetchSearchTerms(customerId, refreshToken, mccId || undefined, {
+      days,
+      campaignId: campaignId || null,
+    });
+    res.json(data);
+  } catch (error) { next(error); }
+};
+
+/**
+ * POST /api/accounts/google-ads/:customerId/campaigns/:campaignId/negative-keywords
+ *
+ * Exclude one or more terms at campaign level, so the exclusion covers every
+ * ad group in the campaign.
+ */
+exports.addNegativeKeywords = async (req, res, next) => {
+  try {
+    const { customerId, campaignId } = req.params;
+    if (!NUMERIC_ID.test(campaignId)) return res.status(400).json({ message: 'Invalid campaign ID' });
+
+    const incoming = Array.isArray(req.body?.keywords) ? req.body.keywords : [];
+    const keywords = incoming
+      .map((k) => (typeof k === 'string' ? { text: k } : k))
+      .filter((k) => k && typeof k.text === 'string' && k.text.trim())
+      .map((k) => ({ text: k.text.trim(), matchType: k.matchType || 'EXACT' }));
+
+    if (!keywords.length) {
+      return res.status(400).json({ message: 'Provide at least one keyword' });
+    }
+
+    const rawMcc = req.query.mccId;
+    const mccId = rawMcc && rawMcc !== 'null' && rawMcc !== 'undefined' ? rawMcc : null;
+    const refreshToken = await resolveRefreshTokenForCustomer(req.user, customerId);
+    if (!refreshToken) return res.status(400).json({ message: 'Google Ads not connected.' });
+
+    const result = await googleAdsService.addNegativeKeywords(
+      customerId, campaignId, keywords, refreshToken, mccId || undefined
+    );
+
+    await logActivity(
+      req.user.id, 'negative_keywords_added', 'campaign', null,
+      `${keywords.length} negative keyword(s) added to campaign ${campaignId}`, req.ip
+    );
+
+    res.json({
+      success: true,
+      message: `${keywords.length} negative keyword(s) added`,
+      added: keywords.length,
+      result,
+    });
+  } catch (error) {
+    logger.error(`Negative keyword mutate failed: ${error.message}`);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 exports.mutateCampaignKeyword = async (req, res, next) => {
   try {
     const { customerId, adGroupId, criterionId } = req.params;

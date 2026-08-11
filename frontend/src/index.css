@@ -4456,3 +4456,12 @@ tbody tr:hover td:first-child { background: var(--bg-subtle); }
 }
 
 .adcopy-link:hover { color: var(--accent); }
+
+/* Search terms modal — wider than the form modals and scrolls its own table,
+   since the report can run to hundreds of rows. */
+.st-modal { max-width: 900px; }
+
+.st-table {
+  max-height: 45vh;
+  overflow-y: auto;
+}
