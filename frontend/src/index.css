@@ -4465,3 +4465,41 @@ tbody tr:hover td:first-child { background: var(--bg-subtle); }
   max-height: 45vh;
   overflow-y: auto;
 }
+
+/* Invite modal — Google's record of pending invitations and existing users. */
+.invite-section-title {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.invite-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  font-size: 12.5px;
+}
+
+/* Takes the slack so the badges sit at the trailing edge. */
+.invite-email {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}

@@ -485,6 +485,51 @@ async function setupBillingForClient(clientId, mccId, refreshToken) {
   }
 }
 
+/**
+ * Invitations Google is currently holding for an account, plus the users who
+ * already have access.
+ *
+ * This is how "the invite never arrived" gets settled: if Google lists it as
+ * PENDING then it was accepted by the API and the problem is delivery
+ * (spam/Promotions), not the request. If it isn't listed, the invite never
+ * reached Google at all.
+ */
+async function fetchAccountAccess(customerId, refreshToken, loginCustomerId) {
+  const invitationQuery = `SELECT customer_user_access_invitation.invitation_id, customer_user_access_invitation.email_address, customer_user_access_invitation.access_role, customer_user_access_invitation.creation_date_time, customer_user_access_invitation.invitation_status FROM customer_user_access_invitation`;
+  const userQuery = `SELECT customer_user_access.user_id, customer_user_access.email_address, customer_user_access.access_role FROM customer_user_access`;
+
+  // One failing must not hide the other — a pending invitation is still worth
+  // reporting when the user list is unavailable, and vice versa.
+  const [invRes, userRes] = await Promise.allSettled([
+    workerQuery(customerId, invitationQuery, refreshToken, loginCustomerId),
+    workerQuery(customerId, userQuery, refreshToken, loginCustomerId),
+  ]);
+
+  const invitations = invRes.status === 'fulfilled'
+    ? invRes.value.map((r) => ({
+        invitationId: String(r.customerUserAccessInvitation?.invitationId || ''),
+        email: r.customerUserAccessInvitation?.emailAddress || '',
+        accessRole: r.customerUserAccessInvitation?.accessRole || '',
+        status: r.customerUserAccessInvitation?.invitationStatus || '',
+        createdAt: r.customerUserAccessInvitation?.creationDateTime || null,
+      }))
+    : [];
+
+  const users = userRes.status === 'fulfilled'
+    ? userRes.value.map((r) => ({
+        email: r.customerUserAccess?.emailAddress || '',
+        accessRole: r.customerUserAccess?.accessRole || '',
+      }))
+    : [];
+
+  return {
+    invitations,
+    users,
+    invitationsError: invRes.status === 'rejected' ? invRes.reason.message : null,
+    usersError: userRes.status === 'rejected' ? userRes.reason.message : null,
+  };
+}
+
 async function sendAccountInvite(customerId, emailAddress, accessRole, refreshToken, loginCustomerId) {
   const url = `${WORKER_BASE}/customers/${customerId}/customerUserAccessInvitations:mutate`;
   const headers = {
@@ -810,6 +855,7 @@ const googleAdsService = {
   fetchAndStoreCampaignMetrics,
   generateMockMetrics,
   sendAccountInvite,
+  fetchAccountAccess,
   setupBillingForClient,
 
   // Search terms report + campaign-level negative keywords

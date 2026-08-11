@@ -30,6 +30,7 @@ const {
   bulkCreateGoogleAdsAccounts,
   sendInvite,
   sendAccountInvite,
+  getAccountAccess,
 } = require('../controllers/accountController');
 
 router.get('/stats', getDashboardStats);
@@ -62,6 +63,8 @@ router.route('/').get(getAllAccounts).post(validators.accounts.create, validate,
 router.post('/:id/sync', validators.accounts.idParam, validate, syncAccount);
 // Invite against a stored account, defaulting to the address saved on it.
 router.post('/:id/invite', validators.accounts.inviteAccount, validate, sendAccountInvite);
+// What Google currently holds for this account: pending invitations + users.
+router.get('/:id/invitations', validators.accounts.idParam, validate, getAccountAccess);
 router.route('/:id')
   .get(validators.accounts.idParam, validate, getAccount)
   .put(validators.accounts.idParam, validate, updateAccount)

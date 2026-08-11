@@ -147,6 +147,8 @@ export const accountsApi = {
   // Invite using the address stored on an account record (falls back to it
   // when `email` is omitted).
   inviteAccount: (id, email) => api.post(`/accounts/${id}/invite`, email ? { email } : {}).then((res) => res.data),
+  /** Pending invitations + users with access, straight from Google. */
+  accountAccess: (id) => api.get(`/accounts/${id}/invitations`).then((res) => res.data),
   get: (id) => api.get(`/accounts/${id}`).then((res) => res.data),
   create: (data) => api.post('/accounts', data).then((res) => res.data),
   update: (id, data) => api.put(`/accounts/${id}`, data).then((res) => res.data),

@@ -1232,6 +1232,46 @@ exports.sendInvite = async (req, res, next) => {
 };
 
 /**
+ * GET /api/accounts/:id/invitations
+ *
+ * What Google actually holds for this account: pending invitations and users
+ * who already have access. Answers "did my invite go out?" with Google's own
+ * record instead of a guess.
+ */
+exports.getAccountAccess = async (req, res, next) => {
+  try {
+    const account = await Account.findOne({ _id: req.params.id, ...(await mccScopeFilter(req.user)) });
+    if (!account) {
+      return res.status(404).json({ success: false, message: 'Account not found' });
+    }
+    if (!account.googleAdsCustomerId) {
+      return res.status(400).json({ success: false, message: 'Account is not linked to Google Ads yet' });
+    }
+
+    // An admin may be looking at an account synced by another user, so fall
+    // back to the owner's connection.
+    let tokenUser = await User.findById(req.user.id).select('googleAdsConfig');
+    if (!tokenUser?.googleAdsConfig?.refreshToken && account.owner) {
+      tokenUser = await User.findById(account.owner).select('googleAdsConfig');
+    }
+    const refreshToken = tokenUser?.googleAdsConfig?.refreshToken;
+    if (!refreshToken) {
+      return res.status(400).json({ success: false, message: 'Google Ads not connected' });
+    }
+
+    const data = await googleAdsService.fetchAccountAccess(
+      account.googleAdsCustomerId,
+      refreshToken,
+      account.sourceMccId
+    );
+
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/accounts/:id/invite — invite against a stored account record,
  * defaulting to the address saved on it. Uses the MCC the account was
  * actually created under, and falls back to the owner's Google connection

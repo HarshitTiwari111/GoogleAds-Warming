@@ -52,6 +52,20 @@ export default function AccountsPage() {
   const [inviteTarget, setInviteTarget] = useState(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
+  const [access, setAccess] = useState(null);
+  const [loadingAccess, setLoadingAccess] = useState(false);
+
+  // What Google already holds for this account, so an invite that "never
+  // arrived" can be checked against Google's own record rather than guessed at.
+  const loadAccess = useCallback((accountId) => {
+    setLoadingAccess(true);
+    setAccess(null);
+    return accountsApi
+      .accountAccess(accountId)
+      .then((res) => setAccess(unwrap(res) || null))
+      .catch((err) => setAccess({ error: err.response?.data?.message || err.message }))
+      .finally(() => setLoadingAccess(false));
+  }, []);
 
   const [pendingDelete, setPendingDelete] = useState(null);
 
@@ -280,7 +294,7 @@ export default function AccountsPage() {
         <div className="cell-actions">
           <button
             className="camp-action-btn"
-            onClick={() => { setInviteTarget(row); setInviteEmail(row.inviteEmail || ''); }}
+            onClick={() => { setInviteTarget(row); setInviteEmail(row.inviteEmail || ''); loadAccess(row._id); }}
             disabled={row.syncedOnly}
             title={row.syncedOnly ? 'Create this account here to manage invites' : 'Send Google Ads access invitation'}
             aria-label={`Invite for ${row.accountName}`}
@@ -373,6 +387,55 @@ export default function AccountsPage() {
                 </button>
               </div>
             </form>
+
+            {/* Google's own record. A pending entry here means the invite was
+                accepted by Google and the issue is delivery, not the request. */}
+            <div className="af-divider" style={{ margin: '20px -28px' }} />
+
+            <h4 className="invite-section-title">Google&apos;s record for this account</h4>
+
+            {loadingAccess ? (
+              <p className="set-hint">Checking with Google…</p>
+            ) : access?.error ? (
+              <p className="set-hint overflow-note">{access.error}</p>
+            ) : (
+              <>
+                <p className="set-hint" style={{ margin: '0 0 8px' }}>
+                  Pending invitations ({access?.invitations?.length || 0})
+                </p>
+                {access?.invitations?.length ? (
+                  <ul className="invite-list">
+                    {access.invitations.map((inv) => (
+                      <li key={inv.invitationId}>
+                        <span className="invite-email">{inv.email}</span>
+                        <span className="pill pill-warning">{inv.status}</span>
+                        <span className="cell-muted">{inv.accessRole}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="set-hint">
+                    None. If an invite you sent isn&apos;t listed, Google never accepted it — the error is shown when you send.
+                  </p>
+                )}
+
+                <p className="set-hint" style={{ margin: '12px 0 8px' }}>
+                  Users with access ({access?.users?.length || 0})
+                </p>
+                {access?.users?.length ? (
+                  <ul className="invite-list">
+                    {access.users.map((u) => (
+                      <li key={u.email}>
+                        <span className="invite-email">{u.email}</span>
+                        <span className="pill pill-success">{u.accessRole}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="set-hint">None yet.</p>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
