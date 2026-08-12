@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Pencil, Trash2, ArrowLeft, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, ArrowLeft, X, UploadCloud } from 'lucide-react';
+import SyncBadge from '../components/SyncBadge';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ConfirmModal from '../components/ConfirmModal';
@@ -35,6 +36,24 @@ export default function KeywordsPage() {
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [pushing, setPushing] = useState(false);
+
+  // Anything not yet live in Google Ads, so the retry button can say how much
+  // it will actually send.
+  const unsynced = keywords.filter((k) => k.syncState !== 'synced').length;
+
+  const handlePush = async () => {
+    setPushing(true);
+    try {
+      const res = await campaignsApi.pushContent(campaignId);
+      showToast(res.message || 'Pushed to Google Ads', res.success ? 'success' : 'error');
+      loadKeywords();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to push to Google Ads', 'error');
+    } finally {
+      setPushing(false);
+    }
+  };
 
   const loadKeywords = useCallback(() => {
     setLoading(true);
@@ -114,6 +133,12 @@ export default function KeywordsPage() {
             <button className="btn-secondary" onClick={() => navigate('/campaigns')}>
               <ArrowLeft size={15} /> Back
             </button>
+            {unsynced > 0 && (
+              <button className="btn-secondary" onClick={handlePush} disabled={pushing}>
+                <UploadCloud size={15} />
+                {pushing ? 'Pushing…' : `Push ${unsynced} to Google Ads`}
+              </button>
+            )}
             <button className="refresh-btn" onClick={openAdd}>
               <Plus size={15} /> Add Keyword
             </button>
@@ -157,14 +182,7 @@ export default function KeywordsPage() {
                     </td>
                     <td><span className={`pill ${kw.status === 'active' ? 'pill-success' : 'pill-neutral'}`}>{kw.status}</span></td>
                     {/* Saved here and live in Google Ads are different things. */}
-                    <td>
-                      <span
-                        className={`pill ${kw.syncState === 'synced' ? 'pill-success' : 'pill-error'}`}
-                        title={kw.syncState === 'synced' ? 'Live in Google Ads' : kw.syncError || 'Not pushed to Google Ads'}
-                      >
-                        {kw.syncState === 'synced' ? 'Synced' : 'Local only'}
-                      </span>
-                    </td>
+                    <td><SyncBadge state={kw.syncState} error={kw.syncError} compact /></td>
                     <td>
                       <div className="cell-actions">
                         <button className="camp-action-btn camp-action-edit" onClick={() => openEdit(kw)} aria-label="Edit keyword">

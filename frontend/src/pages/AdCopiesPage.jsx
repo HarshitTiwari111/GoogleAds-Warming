@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Pencil, Trash2, ArrowLeft, X, ExternalLink } from 'lucide-react';
+import { Plus, Pencil, Trash2, ArrowLeft, X, ExternalLink, UploadCloud } from 'lucide-react';
+import SyncBadge from '../components/SyncBadge';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ConfirmModal from '../components/ConfirmModal';
@@ -54,6 +55,24 @@ export default function AdCopiesPage() {
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [pushing, setPushing] = useState(false);
+
+  // Anything not yet live in Google Ads, so the retry button can say how much
+  // it will actually send.
+  const unsynced = ads.filter((a) => a.syncState !== 'synced').length;
+
+  const handlePush = async () => {
+    setPushing(true);
+    try {
+      const res = await campaignsApi.pushContent(campaignId);
+      showToast(res.message || 'Pushed to Google Ads', res.success ? 'success' : 'error');
+      loadAds();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to push to Google Ads', 'error');
+    } finally {
+      setPushing(false);
+    }
+  };
 
   const loadAds = useCallback(() => {
     setLoading(true);
@@ -144,6 +163,12 @@ export default function AdCopiesPage() {
             <button className="btn-secondary" onClick={() => navigate('/campaigns')}>
               <ArrowLeft size={15} /> Back
             </button>
+            {unsynced > 0 && (
+              <button className="btn-secondary" onClick={handlePush} disabled={pushing}>
+                <UploadCloud size={15} />
+                {pushing ? 'Pushing…' : `Push ${unsynced} to Google Ads`}
+              </button>
+            )}
             <button className="refresh-btn" onClick={openAdd}>
               <Plus size={15} /> Add Ad Copy
             </button>
@@ -196,12 +221,7 @@ export default function AdCopiesPage() {
                 <footer className="adcopy-card-foot">
                   {/* Whether Google actually has this ad — saving locally and
                       being live in Google Ads are different things. */}
-                  <span
-                    className={`pill ${ad.syncState === 'synced' ? 'pill-success' : 'pill-error'}`}
-                    title={ad.syncState === 'synced' ? 'Live in Google Ads' : ad.syncError || 'Not pushed to Google Ads'}
-                  >
-                    {ad.syncState === 'synced' ? 'In Google Ads' : 'Local only'}
-                  </span>
+                  <SyncBadge state={ad.syncState} error={ad.syncError} />
                   <span className="adcopy-meta">
                     {headlines.length} headline{headlines.length > 1 ? 's' : ''} ·{' '}
                     {descriptions.length} description{descriptions.length > 1 ? 's' : ''}

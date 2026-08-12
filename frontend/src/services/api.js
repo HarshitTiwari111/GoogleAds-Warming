@@ -179,6 +179,10 @@ export const campaignsApi = {
   /** Apply the same keywords and/or ad copies to several campaigns at once. */
   bulkAddContent: (campaignIds, { keywords, ads }) =>
     api.post('/campaigns/bulk/content', { campaignIds, keywords, ads }).then((res) => res.data),
+
+  /** Retry: send this campaign's not-yet-synced keywords and ad copies. */
+  pushContent: (campaignId) =>
+    api.post(`/campaigns/${campaignId}/push-content`).then((res) => res.data),
 };
 
 /* ------------------------------------------------------------------ *

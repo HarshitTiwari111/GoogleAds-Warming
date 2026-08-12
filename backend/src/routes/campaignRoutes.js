@@ -16,6 +16,7 @@ const {
   deleteCampaign,
   updateCampaignStatus,
   bulkAddContent,
+  pushCampaignContent,
 } = require('../controllers/campaignController');
 
 // Provisioning-side CRUD (Project A) - every user creates/edits campaigns
@@ -26,6 +27,8 @@ router.get('/account/:accountId', getCampaignsByAccount);
 // Apply keywords / ad copies to many campaigns at once. Declared before the
 // /:id routes so "bulk" is never read as a campaign id.
 router.post('/bulk/content', bulkAddContent);
+// Retry: push this campaign's not-yet-synced keywords and ad copies.
+router.post('/:campaignId/push-content', pushCampaignContent);
 
 // Monitoring-side dashboard endpoints (Project B).
 router.get('/monitoring', getMonitoringCampaigns);

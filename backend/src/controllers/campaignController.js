@@ -343,6 +343,39 @@ exports.bulkAddContent = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/campaigns/:campaignId/push-content
+ *
+ * Send every keyword and ad copy that isn't in Google Ads yet. Anything
+ * created before this app pushed on save sits at 'pending' — never attempted —
+ * and this is how it gets live without re-typing it. Already-synced records
+ * are skipped, so running it twice cannot duplicate anything.
+ */
+exports.pushCampaignContent = async (req, res, next) => {
+  try {
+    const campaign = await Campaign.findById(req.params.campaignId).populate('account');
+    if (!campaign || !canAccessCampaign(req.user, campaign)) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const result = await campaignPushService.pushCampaignContent(campaign, req.user, { Keyword, Ad });
+
+    if (result.attempted === 0) {
+      return res.json({ success: true, data: result, message: 'Everything is already in Google Ads' });
+    }
+
+    res.json({
+      success: result.pushed > 0,
+      data: result,
+      message: result.pushed === result.attempted
+        ? `${result.pushed} item(s) pushed to Google Ads`
+        : `${result.pushed} of ${result.attempted} pushed — ${result.errors[0] || 'see the list for details'}`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /** DELETE /api/campaigns/:id */
 exports.deleteCampaign = async (req, res, next) => {
   try {

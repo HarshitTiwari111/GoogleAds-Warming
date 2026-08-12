@@ -130,4 +130,44 @@ async function pushAd(adDoc, target, cache) {
   }
 }
 
-module.exports = { resolveTarget, pushKeyword, pushAd };
+/**
+ * Push everything for a campaign that isn't in Google Ads yet.
+ *
+ * Records created before pushing existed sit at syncState 'pending' — never
+ * attempted rather than rejected — and re-typing them would be the only other
+ * way to get them live. Already-synced records are skipped so this is safe to
+ * run repeatedly and won't duplicate anything in the account.
+ */
+async function pushCampaignContent(campaign, reqUser, { Keyword, Ad }) {
+  const target = await resolveTarget(campaign, reqUser);
+  const cache = new Map();
+
+  const notSynced = { campaign: campaign._id, syncState: { $ne: 'synced' } };
+  const [keywords, ads] = await Promise.all([
+    Keyword.find(notSynced),
+    Ad.find(notSynced),
+  ]);
+
+  let pushed = 0;
+  const errors = [];
+
+  for (const kw of keywords) {
+    const sync = await pushKeyword(kw, target, cache);
+    Object.assign(kw, sync);
+    await kw.save();
+    if (sync.syncState === 'synced') pushed += 1;
+    else errors.push(`keyword "${kw.keyword}" — ${sync.syncError}`);
+  }
+
+  for (const ad of ads) {
+    const sync = await pushAd(ad, target, cache);
+    Object.assign(ad, sync);
+    await ad.save();
+    if (sync.syncState === 'synced') pushed += 1;
+    else errors.push(`ad "${ad.headline1}" — ${sync.syncError}`);
+  }
+
+  return { attempted: keywords.length + ads.length, pushed, errors };
+}
+
+module.exports = { resolveTarget, pushKeyword, pushAd, pushCampaignContent };
