@@ -218,6 +218,12 @@ export default function AdCopiesPage() {
 
                 <p className="adcopy-desc">{descriptions.join(' ')}</p>
 
+                {/* Shown inline, not just on hover: a rejection is only
+                    actionable once you can read what Google objected to. */}
+                {ad.syncState === 'failed' && ad.syncError && (
+                  <p className="adcopy-error">{ad.syncError}</p>
+                )}
+
                 <footer className="adcopy-card-foot">
                   {/* Whether Google actually has this ad — saving locally and
                       being live in Google Ads are different things. */}

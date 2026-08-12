@@ -4503,3 +4503,18 @@ tbody tr:hover td:first-child { background: var(--bg-subtle); }
   white-space: nowrap;
   color: var(--text-primary);
 }
+
+/* Google's rejection reason on an ad copy, shown inline so it can be read
+   without hovering — it is the only thing that says what to change. */
+.adcopy-error {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--danger-text, #ef4444);
+  border-radius: 0 6px 6px 0;
+  background: var(--danger-bg, rgba(239, 68, 68, 0.08));
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--danger-text, #ef4444);
+  /* A long Google error must wrap rather than stretch the card. */
+  overflow-wrap: anywhere;
+}
