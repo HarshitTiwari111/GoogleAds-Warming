@@ -9,6 +9,18 @@ const adSchema = new mongoose.Schema({
   description2: { type: String, maxlength: 90, trim: true },
   finalUrl: { type: String, required: true, trim: true, match: [/^https?:\/\//, 'finalUrl must start with http:// or https://'] },
   status: { type: String, enum: ['active', 'paused', 'removed'], default: 'active' },
+
+  // Whether this ad copy actually reached Google Ads. The local write succeeds
+  // independently of the push, so an ad saved here but rejected by Google must
+  // not silently look live.
+  googleResourceName: { type: String, default: null },
+  syncState: {
+    type: String,
+    enum: ['pending', 'synced', 'failed', 'local-only'],
+    default: 'pending',
+  },
+  syncError: { type: String, default: null },
+
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 

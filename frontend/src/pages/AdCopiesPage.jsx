@@ -104,8 +104,11 @@ export default function AdCopiesPage() {
         await adCopiesApi.update(editing._id, form);
         showToast('Ad copy updated');
       } else {
-        await adCopiesApi.create(campaignId, form);
-        showToast('Ad copy created');
+        const res = await adCopiesApi.create(campaignId, form);
+        // A local save with a rejected push is a partial success, not a
+        // success — it must not read green.
+        const synced = unwrap(res)?.syncState === 'synced';
+        showToast(res.message || 'Ad copy created', synced ? 'success' : 'error');
       }
       setShowModal(false);
       setForm(EMPTY_FORM);
@@ -191,7 +194,14 @@ export default function AdCopiesPage() {
                 <p className="adcopy-desc">{descriptions.join(' ')}</p>
 
                 <footer className="adcopy-card-foot">
-                  <span className={`pill ${ad.status === 'active' ? 'pill-success' : 'pill-neutral'}`}>{ad.status}</span>
+                  {/* Whether Google actually has this ad — saving locally and
+                      being live in Google Ads are different things. */}
+                  <span
+                    className={`pill ${ad.syncState === 'synced' ? 'pill-success' : 'pill-error'}`}
+                    title={ad.syncState === 'synced' ? 'Live in Google Ads' : ad.syncError || 'Not pushed to Google Ads'}
+                  >
+                    {ad.syncState === 'synced' ? 'In Google Ads' : 'Local only'}
+                  </span>
                   <span className="adcopy-meta">
                     {headlines.length} headline{headlines.length > 1 ? 's' : ''} ·{' '}
                     {descriptions.length} description{descriptions.length > 1 ? 's' : ''}
@@ -226,9 +236,12 @@ export default function AdCopiesPage() {
                 </label>
               </div>
 
+              {/* Google requires at least 3 headlines and 2 descriptions for a
+                  responsive search ad, so all of these are mandatory — an ad
+                  short of them saves locally but is rejected by Google Ads. */}
               <label className="field">
-                <span>Headline 3</span>
-                <input value={form.headline3} onChange={setField('headline3')} maxLength={LIMITS.headline} />
+                <span>Headline 3 *</span>
+                <input value={form.headline3} onChange={setField('headline3')} maxLength={LIMITS.headline} required />
               </label>
 
               <label className="field">
@@ -237,8 +250,9 @@ export default function AdCopiesPage() {
               </label>
 
               <label className="field">
-                <span>Description 2</span>
-                <textarea rows={2} value={form.description2} onChange={setField('description2')} maxLength={LIMITS.description} />
+                <span>Description 2 *</span>
+                <textarea rows={2} value={form.description2} onChange={setField('description2')} maxLength={LIMITS.description} required />
+                <span className="field-hint">Google Ads needs 3 headlines and 2 descriptions to accept the ad.</span>
               </label>
 
               <label className="field">

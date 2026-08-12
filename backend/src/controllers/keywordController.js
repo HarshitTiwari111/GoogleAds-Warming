@@ -1,4 +1,6 @@
 const Keyword = require('../models/Keyword');
+const Campaign = require('../models/Campaign');
+const campaignPushService = require('../services/campaignPushService');
 const APIFeatures = require('../utils/apiFeatures');
 const { asyncHandler } = require('../utils/helpers');
 const { logActivity } = require('../middleware/activityLogger');
@@ -27,9 +29,26 @@ exports.getKeywords = asyncHandler(async (req, res) => {
 exports.createKeyword = asyncHandler(async (req, res) => {
   req.body.createdBy = req.user._id;
   if (req.params.campaignId) req.body.campaign = req.params.campaignId;
+
+  // Saved locally first so typed work is never lost to a Google API failure,
+  // then pushed — the outcome is recorded on the record rather than assumed.
   const keyword = await Keyword.create(req.body);
-  await logActivity(req.user._id, 'keyword_created', 'keyword', keyword._id, `Keyword "${keyword.keyword}" added`, req.ip);
-  res.status(201).json({ success: true, data: keyword });
+
+  const campaign = await Campaign.findById(keyword.campaign).populate('account');
+  const target = await campaignPushService.resolveTarget(campaign, req.user);
+  const sync = await campaignPushService.pushKeyword(keyword, target);
+  Object.assign(keyword, sync);
+  await keyword.save();
+
+  await logActivity(req.user._id, 'keyword_created', 'keyword', keyword._id, `Keyword "${keyword.keyword}" added (${keyword.syncState})`, req.ip);
+
+  res.status(201).json({
+    success: true,
+    data: keyword,
+    message: keyword.syncState === 'synced'
+      ? 'Keyword added and pushed to Google Ads'
+      : `Keyword saved, but not in Google Ads — ${keyword.syncError}`,
+  });
 });
 
 exports.createBulkKeywords = asyncHandler(async (req, res) => {
@@ -43,8 +62,33 @@ exports.createBulkKeywords = asyncHandler(async (req, res) => {
     createdBy: req.user._id
   }));
   const created = await Keyword.insertMany(keywordDocs);
-  await logActivity(req.user._id, 'keywords_bulk_created', 'keyword', null, `${created.length} keywords added`, req.ip);
-  res.status(201).json({ success: true, data: created });
+
+  // One target and one ad group lookup for the whole batch.
+  const campaign = await Campaign.findById(req.params.campaignId).populate('account');
+  const target = await campaignPushService.resolveTarget(campaign, req.user);
+  const adGroupCache = new Map();
+
+  let synced = 0;
+  const failures = [];
+  for (const kw of created) {
+    const sync = await campaignPushService.pushKeyword(kw, target, adGroupCache);
+    Object.assign(kw, sync);
+    await kw.save();
+    if (sync.syncState === 'synced') synced += 1;
+    else failures.push(`${kw.keyword}: ${sync.syncError}`);
+  }
+
+  await logActivity(req.user._id, 'keywords_bulk_created', 'keyword', null, `${created.length} keywords added, ${synced} pushed to Google Ads`, req.ip);
+
+  res.status(201).json({
+    success: true,
+    data: created,
+    synced,
+    failures,
+    message: synced === created.length
+      ? `${synced} keyword(s) added and pushed to Google Ads`
+      : `${created.length} saved, ${synced} pushed to Google Ads — ${failures[0] || 'see keyword list for details'}`,
+  });
 });
 
 exports.updateKeyword = asyncHandler(async (req, res) => {

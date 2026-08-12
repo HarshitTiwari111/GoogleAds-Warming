@@ -1,4 +1,6 @@
 const Ad = require('../models/Ad');
+const Campaign = require('../models/Campaign');
+const campaignPushService = require('../services/campaignPushService');
 const APIFeatures = require('../utils/apiFeatures');
 const { asyncHandler } = require('../utils/helpers');
 const { logActivity } = require('../middleware/activityLogger');
@@ -26,9 +28,26 @@ exports.getAds = asyncHandler(async (req, res) => {
 exports.createAd = asyncHandler(async (req, res) => {
   req.body.createdBy = req.user._id;
   if (req.params.campaignId) req.body.campaign = req.params.campaignId;
+
+  // Saved locally first so typed work is never lost to a Google API failure,
+  // then pushed as a Responsive Search Ad.
   const ad = await Ad.create(req.body);
-  await logActivity(req.user._id, 'ad_created', 'ad', ad._id, `Ad copy created`, req.ip);
-  res.status(201).json({ success: true, data: ad });
+
+  const campaign = await Campaign.findById(ad.campaign).populate('account');
+  const target = await campaignPushService.resolveTarget(campaign, req.user);
+  const sync = await campaignPushService.pushAd(ad, target);
+  Object.assign(ad, sync);
+  await ad.save();
+
+  await logActivity(req.user._id, 'ad_created', 'ad', ad._id, `Ad copy created (${ad.syncState})`, req.ip);
+
+  res.status(201).json({
+    success: true,
+    data: ad,
+    message: ad.syncState === 'synced'
+      ? 'Ad copy created and pushed to Google Ads'
+      : `Ad copy saved, but not in Google Ads — ${ad.syncError}`,
+  });
 });
 
 exports.getAd = asyncHandler(async (req, res) => {

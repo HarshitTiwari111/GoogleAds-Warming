@@ -12,6 +12,7 @@ const Keyword = require('../models/Keyword');
 const Ad = require('../models/Ad');
 const noClicksWarningService = require('../services/noClicksWarningService');
 const googleAdsService = require('../services/googleAdsService');
+const campaignPushService = require('../services/campaignPushService');
 const { logActivity } = require('../middleware/activityLogger');
 const logger = require('../utils/logger');
 const env = require('../config/env');
@@ -258,8 +259,14 @@ exports.bulkAddContent = async (req, res, next) => {
     const errors = [];
     let keywordsCreated = 0;
     let adsCreated = 0;
+    let pushed = 0;
+    const adGroupCache = new Map();
 
     for (const campaign of allowed) {
+      // Resolved once per campaign; the ad group lookup is cached across the
+      // whole run so a large batch doesn't re-query it per item.
+      const target = await campaignPushService.resolveTarget(campaign, req.user);
+
       if (keywords.length) {
         try {
           const docs = await Keyword.insertMany(
@@ -274,6 +281,14 @@ exports.bulkAddContent = async (req, res, next) => {
             { ordered: false }
           );
           keywordsCreated += docs.length;
+
+          for (const kw of docs) {
+            const sync = await campaignPushService.pushKeyword(kw, target, adGroupCache);
+            Object.assign(kw, sync);
+            await kw.save();
+            if (sync.syncState === 'synced') pushed += 1;
+            else errors.push(`${campaign.campaignName} / ${kw.keyword} — ${sync.syncError}`);
+          }
         } catch (err) {
           // insertMany with ordered:false still writes the valid rows.
           keywordsCreated += err.insertedDocs?.length || 0;
@@ -283,8 +298,14 @@ exports.bulkAddContent = async (req, res, next) => {
 
       for (const ad of ads) {
         try {
-          await Ad.create({ ...ad, campaign: campaign._id, createdBy: req.user._id });
+          const doc = await Ad.create({ ...ad, campaign: campaign._id, createdBy: req.user._id });
           adsCreated += 1;
+
+          const sync = await campaignPushService.pushAd(doc, target, adGroupCache);
+          Object.assign(doc, sync);
+          await doc.save();
+          if (sync.syncState === 'synced') pushed += 1;
+          else errors.push(`${campaign.campaignName} / ad "${doc.headline1}" — ${sync.syncError}`);
         } catch (err) {
           errors.push(`${campaign.campaignName}: ad copy — ${err.message.slice(0, 120)}`);
         }
@@ -300,16 +321,22 @@ exports.bulkAddContent = async (req, res, next) => {
       req.ip
     );
 
+    const total = keywordsCreated + adsCreated;
     res.json({
       success: true,
       data: {
         campaigns: allowed.length,
         keywordsCreated,
         adsCreated,
+        pushed,
         skipped: skipped.length,
         errors,
       },
-      message: `Added ${keywordsCreated} keyword(s) and ${adsCreated} ad copy(ies) to ${allowed.length} campaign(s)`,
+      // Saved and pushed are reported separately: everything saves locally,
+      // but only what Google accepted is actually live.
+      message: pushed === total
+        ? `Added ${keywordsCreated} keyword(s) and ${adsCreated} ad copy(ies) to ${allowed.length} campaign(s), all live in Google Ads`
+        : `Saved ${total} item(s) across ${allowed.length} campaign(s) — ${pushed} live in Google Ads, ${total - pushed} local only`,
     });
   } catch (error) {
     next(error);

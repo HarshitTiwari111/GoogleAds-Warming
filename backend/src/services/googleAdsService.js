@@ -486,6 +486,76 @@ async function setupBillingForClient(clientId, mccId, refreshToken) {
 }
 
 /**
+ * The ad groups inside a campaign.
+ *
+ * Keywords and ads attach to an ad group in Google Ads, never to a campaign
+ * directly, so anything pushed for a campaign has to resolve one first.
+ */
+async function fetchAdGroups(customerId, googleCampaignId, refreshToken, loginCustomerId) {
+  const query = `SELECT ad_group.id, ad_group.name, ad_group.resource_name, ad_group.status FROM ad_group WHERE campaign.id = ${googleCampaignId}`;
+  const rows = await workerQuery(customerId, query, refreshToken, loginCustomerId);
+  return rows
+    .filter((r) => r.adGroup && r.adGroup.status !== 'REMOVED')
+    .map((r) => ({
+      id: String(r.adGroup.id),
+      name: r.adGroup.name || '',
+      resourceName: r.adGroup.resourceName || `customers/${customerId}/adGroups/${r.adGroup.id}`,
+      status: r.adGroup.status,
+    }));
+}
+
+/**
+ * An ad group to attach keywords and ads to: the campaign's first existing
+ * one, or a new one when the campaign has none. A campaign created outside
+ * this app may legitimately have no ad group yet, and failing in that case
+ * would block the operator for no good reason.
+ */
+async function resolveAdGroup(customerId, googleCampaignId, refreshToken, loginCustomerId) {
+  const existing = await fetchAdGroups(customerId, googleCampaignId, refreshToken, loginCustomerId);
+  if (existing.length) return existing[0].resourceName;
+
+  logger.info(`[PUSH] Campaign ${googleCampaignId} has no ad group — creating one`);
+  return googleAdsService.createAdGroup(
+    customerId,
+    `customers/${customerId}/campaigns/${googleCampaignId}`,
+    { name: 'Ad Group 1', cpcBidMicros: 500000 },
+    { refreshToken },
+    loginCustomerId
+  );
+}
+
+/**
+ * Add a keyword to Google Ads.
+ *
+ * A positive keyword becomes an ad group criterion; a negative one is applied
+ * at campaign level, which is where negatives belong so they cover every ad
+ * group in the campaign.
+ */
+async function pushKeyword({ customerId, adGroupResource, googleCampaignId, keyword, matchType, isNegative, refreshToken, loginCustomerId }) {
+  const criterion = { keyword: { text: keyword, matchType: String(matchType || 'broad').toUpperCase() } };
+
+  const operation = isNegative
+    ? {
+        campaignCriterionOperation: {
+          create: {
+            campaign: `customers/${customerId}/campaigns/${googleCampaignId}`,
+            negative: true,
+            ...criterion,
+          },
+        },
+      }
+    : {
+        adGroupCriterionOperation: {
+          create: { adGroup: adGroupResource, status: 'ENABLED', ...criterion },
+        },
+      };
+
+  const result = await workerMutate(customerId, [operation], refreshToken, loginCustomerId);
+  const res = result.mutateOperationResponses?.[0];
+  return res?.adGroupCriterionResult?.resourceName || res?.campaignCriterionResult?.resourceName || null;
+}
+
+/**
  * Invitations Google is currently holding for an account, plus the users who
  * already have access.
  *
@@ -858,6 +928,11 @@ const googleAdsService = {
   fetchAccountAccess,
   setupBillingForClient,
 
+  // Pushing locally-authored keywords and ad copies into Google Ads.
+  fetchAdGroups,
+  resolveAdGroup,
+  pushKeyword,
+
   // Search terms report + campaign-level negative keywords
   workerSearchStream,
   fetchSearchTerms,
@@ -1062,19 +1137,29 @@ const googleAdsService = {
 
   async createResponsiveSearchAd(customerId, adGroupResource, adConfig, credentials, loginCustomerId) {
     const refreshToken = credentials?.refreshToken;
-    if (!refreshToken) return;
+    if (!refreshToken) throw new Error('No Google Ads refresh token available');
 
-    const headlines = (adConfig.headlines || []).slice(0, 15).map((text) => ({ text }));
-    const descriptions = (adConfig.descriptions || []).slice(0, 4).map((text) => ({ text }));
+    // Google requires at least 3 headlines and 2 descriptions for a
+    // responsive search ad. Rejecting here gives a clear reason instead of an
+    // opaque API error.
+    const headlines = (adConfig.headlines || []).filter(Boolean).slice(0, 15);
+    const descriptions = (adConfig.descriptions || []).filter(Boolean).slice(0, 4);
 
-    await workerMutate(customerId, [{
+    if (headlines.length < 3) {
+      throw new Error(`Google Ads needs at least 3 headlines for a responsive search ad (got ${headlines.length})`);
+    }
+    if (descriptions.length < 2) {
+      throw new Error(`Google Ads needs at least 2 descriptions for a responsive search ad (got ${descriptions.length})`);
+    }
+
+    const result = await workerMutate(customerId, [{
       adGroupAdOperation: {
         create: {
           adGroup: adGroupResource,
           ad: {
             responsiveSearchAd: {
-              headlines,
-              descriptions,
+              headlines: headlines.map((text) => ({ text })),
+              descriptions: descriptions.map((text) => ({ text })),
             },
             finalUrls: [adConfig.finalUrl],
           },
@@ -1082,6 +1167,8 @@ const googleAdsService = {
         },
       },
     }], refreshToken, loginCustomerId);
+
+    return result.mutateOperationResponses?.[0]?.adGroupAdResult?.resourceName || null;
   },
 
   async enableCampaign(customerId, campaignResource, credentials, loginCustomerId) {

@@ -76,8 +76,9 @@ export default function KeywordsPage() {
         await keywordsApi.update(editing._id, form);
         showToast('Keyword updated');
       } else {
-        await keywordsApi.create(campaignId, form);
-        showToast('Keyword added');
+        const res = await keywordsApi.create(campaignId, form);
+        const synced = unwrap(res)?.syncState === 'synced';
+        showToast(res.message || 'Keyword added', synced ? 'success' : 'error');
       }
       setShowModal(false);
       setForm(EMPTY_FORM);
@@ -133,13 +134,14 @@ export default function KeywordsPage() {
                 <th>Match Type</th>
                 <th>Type</th>
                 <th>Status</th>
+                <th>Google Ads</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {keywords.length === 0 ? (
                 <tr>
-                  <td className="empty-row" colSpan={5}>
+                  <td className="empty-row" colSpan={6}>
                     No keywords found. Click &quot;Add Keyword&quot; to get started.
                   </td>
                 </tr>
@@ -154,6 +156,15 @@ export default function KeywordsPage() {
                       </span>
                     </td>
                     <td><span className={`pill ${kw.status === 'active' ? 'pill-success' : 'pill-neutral'}`}>{kw.status}</span></td>
+                    {/* Saved here and live in Google Ads are different things. */}
+                    <td>
+                      <span
+                        className={`pill ${kw.syncState === 'synced' ? 'pill-success' : 'pill-error'}`}
+                        title={kw.syncState === 'synced' ? 'Live in Google Ads' : kw.syncError || 'Not pushed to Google Ads'}
+                      >
+                        {kw.syncState === 'synced' ? 'Synced' : 'Local only'}
+                      </span>
+                    </td>
                     <td>
                       <div className="cell-actions">
                         <button className="camp-action-btn camp-action-edit" onClick={() => openEdit(kw)} aria-label="Edit keyword">
