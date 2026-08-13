@@ -486,6 +486,76 @@ async function setupBillingForClient(clientId, mccId, refreshToken) {
 }
 
 /**
+ * Google's own verdict on a campaign's ads: whether each is approved, still
+ * under review or disapproved, and the policy topics behind that.
+ *
+ * Approval is Google's decision and nothing here can hurry it, but an ad that
+ * sits "under review" indefinitely usually has a reason Google is already
+ * reporting — a policy topic, or a limitation like billing not being set up.
+ * Without this the dashboard could only say whether the push succeeded, which
+ * says nothing about whether the ad will ever run.
+ */
+async function fetchAdApprovalStatus(customerId, googleCampaignId, refreshToken, loginCustomerId) {
+  const query = `SELECT ad_group_ad.ad.id, ad_group_ad.status, ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.review_status, ad_group_ad.policy_summary.policy_topic_entries, ad_group_ad.ad.responsive_search_ad.headlines FROM ad_group_ad WHERE campaign.id = ${googleCampaignId}`;
+  const rows = await workerQuery(customerId, query, refreshToken, loginCustomerId);
+
+  return rows.map((r) => {
+    const summary = r.adGroupAd?.policySummary || {};
+    return {
+      adId: String(r.adGroupAd?.ad?.id || ''),
+      status: r.adGroupAd?.status || '',
+      approvalStatus: summary.approvalStatus || 'UNKNOWN',
+      reviewStatus: summary.reviewStatus || '',
+      // Each entry names a policy and, where Google gives one, why it applied.
+      policyTopics: (summary.policyTopicEntries || []).map((e) => ({
+        topic: e.topic || '',
+        type: e.type || '',
+      })),
+      headlines: (r.adGroupAd?.ad?.responsiveSearchAd?.headlines || []).map((h) => h.text).filter(Boolean),
+    };
+  });
+}
+
+/**
+ * Whether an account can actually spend: its billing setup and account budget.
+ *
+ * An account with no approved billing keeps its ads unserved no matter how
+ * long the review takes, so this is the first thing to check when ads never
+ * go live.
+ */
+async function fetchBillingStatus(customerId, refreshToken, loginCustomerId) {
+  const [setupRes, budgetRes] = await Promise.allSettled([
+    workerQuery(customerId, 'SELECT billing_setup.id, billing_setup.status, billing_setup.payments_account_info.payments_account_id FROM billing_setup', refreshToken, loginCustomerId),
+    workerQuery(customerId, 'SELECT account_budget.id, account_budget.status, account_budget.approved_spending_limit_micros, account_budget.proposed_spending_limit_micros FROM account_budget', refreshToken, loginCustomerId),
+  ]);
+
+  const setups = setupRes.status === 'fulfilled'
+    ? setupRes.value.map((r) => ({
+        id: String(r.billingSetup?.id || ''),
+        status: r.billingSetup?.status || '',
+        paymentsAccountId: r.billingSetup?.paymentsAccountInfo?.paymentsAccountId || '',
+      }))
+    : [];
+
+  const budgets = budgetRes.status === 'fulfilled'
+    ? budgetRes.value.map((r) => ({
+        id: String(r.accountBudget?.id || ''),
+        status: r.accountBudget?.status || '',
+        limitMicros: r.accountBudget?.approvedSpendingLimitMicros || r.accountBudget?.proposedSpendingLimitMicros || null,
+      }))
+    : [];
+
+  const approved = setups.find((s) => ['APPROVED', 'APPROVED_HELD'].includes(s.status));
+
+  return {
+    billingSetups: setups,
+    accountBudgets: budgets,
+    hasApprovedBilling: Boolean(approved),
+    error: setupRes.status === 'rejected' ? setupRes.reason.message : null,
+  };
+}
+
+/**
  * The ad groups inside a campaign.
  *
  * Keywords and ads attach to an ad group in Google Ads, never to a campaign
@@ -927,6 +997,10 @@ const googleAdsService = {
   sendAccountInvite,
   fetchAccountAccess,
   setupBillingForClient,
+
+  // Google's own verdict on ads, and whether the account can spend at all.
+  fetchAdApprovalStatus,
+  fetchBillingStatus,
 
   // Pushing locally-authored keywords and ad copies into Google Ads.
   fetchAdGroups,

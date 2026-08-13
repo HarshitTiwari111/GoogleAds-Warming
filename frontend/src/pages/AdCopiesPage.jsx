@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2, ArrowLeft, X, ExternalLink, UploadCloud } from 'lucide-react';
 import SyncBadge from '../components/SyncBadge';
+import AdApprovalPanel from '../components/AdApprovalPanel';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ConfirmModal from '../components/ConfirmModal';
@@ -177,6 +178,10 @@ export default function AdCopiesPage() {
       />
 
       {error && <div className="error-banner">Could not load ad copies. ({error.message})</div>}
+
+      {/* Google's own verdict, which is a different question from whether the
+          push from here succeeded. */}
+      <AdApprovalPanel campaignId={campaignId} />
 
       {loading ? (
         <LoadingSpinner label="Loading ad copies…" />

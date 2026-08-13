@@ -17,6 +17,7 @@ const {
   updateCampaignStatus,
   bulkAddContent,
   pushCampaignContent,
+  getAdApprovalStatus,
 } = require('../controllers/campaignController');
 
 // Provisioning-side CRUD (Project A) - every user creates/edits campaigns
@@ -29,6 +30,8 @@ router.get('/account/:accountId', getCampaignsByAccount);
 router.post('/bulk/content', bulkAddContent);
 // Retry: push this campaign's not-yet-synced keywords and ad copies.
 router.post('/:campaignId/push-content', pushCampaignContent);
+// Google's own approval verdict on this campaign's ads, plus billing state.
+router.get('/:campaignId/ad-status', getAdApprovalStatus);
 
 // Monitoring-side dashboard endpoints (Project B).
 router.get('/monitoring', getMonitoringCampaigns);

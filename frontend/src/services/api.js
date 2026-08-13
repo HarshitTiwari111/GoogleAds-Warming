@@ -183,6 +183,10 @@ export const campaignsApi = {
   /** Retry: send this campaign's not-yet-synced keywords and ad copies. */
   pushContent: (campaignId) =>
     api.post(`/campaigns/${campaignId}/push-content`).then((res) => res.data),
+
+  /** Google's approval verdict on this campaign's ads, plus billing state. */
+  adStatus: (campaignId) =>
+    api.get(`/campaigns/${campaignId}/ad-status`).then((res) => res.data),
 };
 
 /* ------------------------------------------------------------------ *

@@ -4518,3 +4518,23 @@ tbody tr:hover td:first-child { background: var(--bg-subtle); }
   /* A long Google error must wrap rather than stretch the card. */
   overflow-wrap: anywhere;
 }
+
+/* Google Ads approval panel — Google's verdict on a campaign's ads. */
+.approval-panel { margin-bottom: 16px; }
+
+.approval-billing {
+  margin-bottom: 14px;
+  line-height: 1.55;
+}
+
+.approval-note {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+}
+
+/* Icon and label sit on one line inside the status pill. */
+.approval-panel .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

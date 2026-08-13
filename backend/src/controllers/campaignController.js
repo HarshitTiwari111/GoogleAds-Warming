@@ -376,6 +376,51 @@ exports.pushCampaignContent = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/campaigns/:campaignId/ad-status
+ *
+ * Google's own verdict on this campaign's ads, plus whether the account can
+ * spend at all.
+ *
+ * Approval is Google's decision and nothing here can hurry it — but an ad that
+ * never leaves "under review" usually has a reason Google already reports, and
+ * the most common one is that the account has no approved billing, in which
+ * case the ad will never serve however long the review takes.
+ */
+exports.getAdApprovalStatus = async (req, res, next) => {
+  try {
+    const campaign = await Campaign.findById(req.params.campaignId).populate('account');
+    if (!campaign || !canAccessCampaign(req.user, campaign)) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const target = await campaignPushService.resolveTarget(campaign, req.user);
+    if (!target.ok) {
+      return res.json({ success: false, message: target.reason, data: null });
+    }
+
+    // Independent so a billing query failure still returns the ad verdicts.
+    const [adsRes, billingRes] = await Promise.allSettled([
+      googleAdsService.fetchAdApprovalStatus(target.customerId, target.googleCampaignId, target.refreshToken, target.loginCustomerId),
+      googleAdsService.fetchBillingStatus(target.customerId, target.refreshToken, target.loginCustomerId),
+    ]);
+
+    const ads = adsRes.status === 'fulfilled' ? adsRes.value : [];
+    const billing = billingRes.status === 'fulfilled' ? billingRes.value : null;
+
+    res.json({
+      success: true,
+      data: {
+        ads,
+        billing,
+        adsError: adsRes.status === 'rejected' ? adsRes.reason.message : null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /** DELETE /api/campaigns/:id */
 exports.deleteCampaign = async (req, res, next) => {
   try {
