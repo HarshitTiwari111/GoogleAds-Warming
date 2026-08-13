@@ -617,6 +617,24 @@ async function fetchAdGroups(customerId, googleCampaignId, refreshToken, loginCu
 }
 
 /**
+ * How many live ads each ad group in a campaign already holds, keyed by ad
+ * group id. Removed ads don't count against the limit, so they're excluded.
+ */
+async function fetchAdCountsByAdGroup(customerId, googleCampaignId, refreshToken, loginCustomerId) {
+  const query = `SELECT ad_group.id, ad_group_ad.ad.id, ad_group_ad.status FROM ad_group_ad WHERE campaign.id = ${googleCampaignId}`;
+  const rows = await workerQuery(customerId, query, refreshToken, loginCustomerId);
+
+  const counts = {};
+  rows
+    .filter((r) => r.adGroupAd && r.adGroupAd.status !== 'REMOVED')
+    .forEach((r) => {
+      const id = String(r.adGroup?.id || '');
+      if (id) counts[id] = (counts[id] || 0) + 1;
+    });
+  return counts;
+}
+
+/**
  * The ad group name an ad belongs in, derived from its final URL's domain —
  * `https://www.udemy.com/course/x` becomes `udemy.com`. Null when the URL
  * isn't parseable, or when there is no URL at all (keywords).
@@ -630,6 +648,10 @@ function adGroupNameForUrl(finalUrl) {
   }
 }
 
+// Google accepts at most three enabled responsive search ads in one ad group;
+// a fourth is rejected with RESOURCE_LIMIT.
+const MAX_ADS_PER_AD_GROUP = 3;
+
 /**
  * An ad group to attach keywords and ads to.
  *
@@ -639,31 +661,57 @@ function adGroupNameForUrl(finalUrl) {
  * first ad group — which is what this did before — meant that adding ad
  * copies for a second website silently got them rejected.
  *
+ * A domain can outgrow one ad group, since Google caps it at three ads, so
+ * the groups for a domain are numbered — `udemy.com`, `udemy.com 2`, … — and
+ * this returns the first with room, adding another when they are all full.
+ *
  * Without a usable URL (keywords have none) this falls back to the first
  * existing ad group, and creates one when the campaign has none: a campaign
  * created outside this app may legitimately have no ad group yet, and failing
  * in that case would block the operator for no good reason.
+ *
+ * Returns `{ resourceName, remaining }`. `remaining` is how many more ads fit,
+ * so a caller pushing a batch knows when to stop reusing this ad group rather
+ * than discovering it by getting RESOURCE_LIMIT back from Google.
  */
 async function resolveAdGroup(customerId, googleCampaignId, refreshToken, loginCustomerId, finalUrl) {
   const existing = await fetchAdGroups(customerId, googleCampaignId, refreshToken, loginCustomerId);
   const domain = adGroupNameForUrl(finalUrl);
 
   if (!domain) {
-    if (existing.length) return existing[0].resourceName;
-  } else {
-    const match = existing.find((g) => g.name.toLowerCase() === domain);
-    if (match) return match.resourceName;
+    if (existing.length) return { resourceName: existing[0].resourceName, remaining: MAX_ADS_PER_AD_GROUP };
+    return createNamedAdGroup(customerId, googleCampaignId, 'Ad Group 1', refreshToken, loginCustomerId);
   }
 
-  const name = domain || 'Ad Group 1';
+  // `udemy.com` and its overflow groups `udemy.com 2`, `udemy.com 3`, …
+  const mine = existing.filter((g) => {
+    const n = g.name.toLowerCase();
+    return n === domain || n.startsWith(`${domain} `);
+  });
+
+  if (mine.length) {
+    const counts = await fetchAdCountsByAdGroup(customerId, googleCampaignId, refreshToken, loginCustomerId);
+    const room = mine.find((g) => (counts[g.id] || 0) < MAX_ADS_PER_AD_GROUP);
+    if (room) {
+      return { resourceName: room.resourceName, remaining: MAX_ADS_PER_AD_GROUP - (counts[room.id] || 0) };
+    }
+  }
+
+  // All full (or none yet): the next number in the series.
+  const name = mine.length ? `${domain} ${mine.length + 1}` : domain;
+  return createNamedAdGroup(customerId, googleCampaignId, name, refreshToken, loginCustomerId);
+}
+
+async function createNamedAdGroup(customerId, googleCampaignId, name, refreshToken, loginCustomerId) {
   logger.info(`[PUSH] Campaign ${googleCampaignId}: creating ad group "${name}"`);
-  return googleAdsService.createAdGroup(
+  const resourceName = await googleAdsService.createAdGroup(
     customerId,
     `customers/${customerId}/campaigns/${googleCampaignId}`,
     { name, cpcBidMicros: 500000 },
     { refreshToken },
     loginCustomerId
   );
+  return { resourceName, remaining: MAX_ADS_PER_AD_GROUP };
 }
 
 /**

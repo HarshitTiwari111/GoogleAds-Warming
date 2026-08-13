@@ -60,20 +60,26 @@ async function resolveTarget(campaign, reqUser) {
  * Keyed by final URL as well as campaign, because ads for different websites
  * must land in different ad groups — caching on the campaign alone would send
  * the whole batch to whichever website happened to be pushed first.
+ *
+ * The entry also tracks how many more ads the group takes. Google caps an ad
+ * group at three ads, so a batch larger than that has to move on to the next
+ * group; without this the cache would keep handing back a full one and every
+ * ad past the third would fail with RESOURCE_LIMIT.
  */
 async function getAdGroup(target, cache, finalUrl) {
   const key = `${target.customerId}:${target.googleCampaignId}:${finalUrl || ''}`;
-  if (cache?.has(key)) return cache.get(key);
+  const cached = cache?.get(key);
+  if (cached && cached.remaining > 0) return cached;
 
-  const resource = await googleAdsService.resolveAdGroup(
+  const resolved = await googleAdsService.resolveAdGroup(
     target.customerId,
     target.googleCampaignId,
     target.refreshToken,
     target.loginCustomerId,
     finalUrl
   );
-  cache?.set(key, resource);
-  return resource;
+  cache?.set(key, resolved);
+  return resolved;
 }
 
 /**
@@ -87,7 +93,7 @@ async function pushKeyword(keywordDoc, target, cache) {
 
   try {
     // Negatives go on the campaign, so they need no ad group.
-    const adGroupResource = keywordDoc.isNegative ? null : await getAdGroup(target, cache);
+    const adGroupResource = keywordDoc.isNegative ? null : (await getAdGroup(target, cache)).resourceName;
 
     const resourceName = await googleAdsService.pushKeyword({
       customerId: target.customerId,
@@ -117,11 +123,11 @@ async function pushAd(adDoc, target, cache) {
   try {
     // Grouped by destination: Google disapproves an ad whose website differs
     // from the rest of its ad group.
-    const adGroupResource = await getAdGroup(target, cache, adDoc.finalUrl);
+    const adGroup = await getAdGroup(target, cache, adDoc.finalUrl);
 
     const resourceName = await googleAdsService.createResponsiveSearchAd(
       target.customerId,
-      adGroupResource,
+      adGroup.resourceName,
       {
         headlines: [adDoc.headline1, adDoc.headline2, adDoc.headline3].filter(Boolean),
         descriptions: [adDoc.description1, adDoc.description2].filter(Boolean),
@@ -131,9 +137,18 @@ async function pushAd(adDoc, target, cache) {
       target.loginCustomerId
     );
 
+    // One slot of this ad group is now taken; the next ad in the batch moves
+    // on once it runs out.
+    adGroup.remaining -= 1;
+
     logger.info(`[PUSH] Ad copy "${adDoc.headline1}" -> ${resourceName}`);
     return { syncState: 'synced', googleResourceName: resourceName || null, syncError: null };
   } catch (err) {
+    // The cached ad group may be why this failed — if Google says it is full,
+    // reusing it would fail every remaining ad in the batch the same way.
+    if (/RESOURCE_LIMIT/.test(err.message)) {
+      cache?.delete(`${target.customerId}:${target.googleCampaignId}:${adDoc.finalUrl || ''}`);
+    }
     logger.error(`[PUSH] Ad copy "${adDoc.headline1}" failed: ${err.message}`);
     return { syncState: 'failed', syncError: err.message.slice(0, 600), googleResourceName: null };
   }
