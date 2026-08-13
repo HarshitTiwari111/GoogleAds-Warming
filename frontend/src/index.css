@@ -4538,3 +4538,8 @@ tbody tr:hover td:first-child { background: var(--bg-subtle); }
   align-items: center;
   gap: 5px;
 }
+
+.approval-checked {
+  margin: -8px 0 14px;
+  font-size: 11.5px;
+}

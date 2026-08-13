@@ -19,10 +19,13 @@ const APPROVAL = {
  * the most common one is that the account has no approved billing, in which
  * case the ad will never serve however long the review runs.
  */
+const POLL_MS = 60000;
+
 export default function AdApprovalPanel({ campaignId }) {
   const [data, setData] = useState(null);
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [checkedAt, setCheckedAt] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -31,6 +34,7 @@ export default function AdApprovalPanel({ campaignId }) {
       .then((res) => {
         setData(unwrap(res));
         setMessage(res.success ? null : res.message);
+        setCheckedAt(new Date());
       })
       .catch((err) => setMessage(err.response?.data?.message || err.message))
       .finally(() => setLoading(false));
@@ -39,6 +43,19 @@ export default function AdApprovalPanel({ campaignId }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Google decides when an ad is approved; all this does is notice promptly.
+  // Polling stops once nothing is awaiting a verdict, so a settled campaign
+  // isn't queried forever.
+  const awaitingVerdict = (data?.ads || []).some(
+    (a) => a.approvalStatus === 'UNKNOWN' || a.reviewStatus === 'UNDER_REVIEW' || a.reviewStatus === 'REVIEW_IN_PROGRESS'
+  );
+
+  useEffect(() => {
+    if (!awaitingVerdict) return undefined;
+    const id = setInterval(load, POLL_MS);
+    return () => clearInterval(id);
+  }, [awaitingVerdict, load]);
 
   // Nothing useful to say yet — stay out of the way rather than show an empty box.
   if (loading && !data) return null;
@@ -65,6 +82,15 @@ export default function AdApprovalPanel({ campaignId }) {
           <RefreshCw size={14} className={loading ? 'set-spin' : undefined} /> Refresh
         </button>
       </div>
+
+      {/* Says plainly whether the page is still watching, so a stale-looking
+          status isn't mistaken for a stuck one. */}
+      {checkedAt && (
+        <p className="set-hint approval-checked">
+          Last checked {checkedAt.toLocaleTimeString()}
+          {awaitingVerdict ? ' · re-checking every minute while ads await a verdict' : ' · all ads have a verdict'}
+        </p>
+      )}
 
       {/* The single most common reason ads never leave review. */}
       {billingMissing && (
