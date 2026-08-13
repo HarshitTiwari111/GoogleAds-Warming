@@ -35,6 +35,34 @@ const dbStatus = () => ({
 });
 
 /**
+ * The commit this process is running, resolved once at boot.
+ *
+ * Deploying the frontend build without restarting the backend leaves the two
+ * on different code, and the symptom — a fix that visibly shipped but doesn't
+ * take effect — is indistinguishable from the fix not working. This makes the
+ * running backend say which commit it is, so that is one request to check.
+ *
+ * Render and similar platforms expose the commit in the environment; a plain
+ * VPS deploy has a git checkout instead, so fall back to asking git.
+ */
+const startedAt = new Date();
+
+const commit = (() => {
+  const fromEnv = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.SOURCE_COMMIT;
+  if (fromEnv) return fromEnv.slice(0, 7);
+  try {
+    // eslint-disable-next-line global-require
+    return require('child_process')
+      .execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    // No git checkout and no env var — an upload-only deploy. Not an error.
+    return 'unknown';
+  }
+})();
+
+/**
  * Liveness — "the process is up". Always 200 so a platform health check marks
  * the deploy live and its logs and this endpoint stay reachable.
  *
@@ -49,6 +77,12 @@ router.get('/health', (req, res) => {
     success: true,
     message: db.ok ? 'OK' : 'Running, but the database is unreachable',
     database: db.state,
+    commit,
+    // When this process last started. Uploading files over FTP does not
+    // reload a running Node process, so an old startedAt is the clearest sign
+    // that the code on disk is not the code being served.
+    startedAt: startedAt.toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
   });
 });
