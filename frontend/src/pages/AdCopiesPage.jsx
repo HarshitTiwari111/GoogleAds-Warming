@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2, ArrowLeft, X, ExternalLink, UploadCloud } from 'lucide-react';
 import SyncBadge from '../components/SyncBadge';
 import AdApprovalPanel from '../components/AdApprovalPanel';
+import ApprovalBadge from '../components/ApprovalBadge';
+import useAdApprovalStatus from '../hooks/useAdApprovalStatus';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ConfirmModal from '../components/ConfirmModal';
@@ -62,12 +64,18 @@ export default function AdCopiesPage() {
   // it will actually send.
   const unsynced = ads.filter((a) => a.syncState !== 'synced').length;
 
+  // Google's verdict, fetched once and read both by the summary panel and by
+  // the badge on each card.
+  const approval = useAdApprovalStatus(campaignId);
+
   const handlePush = async () => {
     setPushing(true);
     try {
       const res = await campaignsApi.pushContent(campaignId);
       showToast(res.message || 'Pushed to Google Ads', res.success ? 'success' : 'error');
       loadAds();
+      // A newly pushed ad has no verdict yet; re-asking starts the watch on it.
+      approval.reload();
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to push to Google Ads', 'error');
     } finally {
@@ -181,7 +189,7 @@ export default function AdCopiesPage() {
 
       {/* Google's own verdict, which is a different question from whether the
           push from here succeeded. */}
-      <AdApprovalPanel campaignId={campaignId} />
+      <AdApprovalPanel status={approval} />
 
       {loading ? (
         <LoadingSpinner label="Loading ad copies…" />
@@ -230,9 +238,10 @@ export default function AdCopiesPage() {
                 )}
 
                 <footer className="adcopy-card-foot">
-                  {/* Whether Google actually has this ad — saving locally and
-                      being live in Google Ads are different things. */}
+                  {/* Two separate questions, side by side: did the push reach
+                      Google, and what did Google then decide about the ad. */}
                   <SyncBadge state={ad.syncState} error={ad.syncError} />
+                  <ApprovalBadge ad={approval.lookup(ad.googleResourceName)} />
                   <span className="adcopy-meta">
                     {headlines.length} headline{headlines.length > 1 ? 's' : ''} ·{' '}
                     {descriptions.length} description{descriptions.length > 1 ? 's' : ''}

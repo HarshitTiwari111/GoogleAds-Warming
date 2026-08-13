@@ -310,6 +310,48 @@ async function fetchAndStoreCampaignMetrics() {
   return savedDocs;
 }
 
+/**
+ * The operator-readable reason inside a Google Ads error body.
+ *
+ * A GoogleAdsFailure buries the one useful sentence under ~200 characters of
+ * envelope ("Request contains an invalid argument", the @type URL, ...), so
+ * truncating the raw body to a fixed length reliably cuts the response off
+ * just before the part worth reading. This pulls out the specific error —
+ * its message, the rule it broke, and which field — and falls back to the raw
+ * body only when the shape is unrecognised.
+ */
+function describeGoogleAdsError(text, fallbackLabel) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return `${fallbackLabel}: ${String(text).substring(0, 300)}`;
+  }
+
+  const failures = parsed?.error?.details?.find((d) => Array.isArray(d.errors))?.errors || [];
+  if (!failures.length) {
+    return parsed?.error?.message ? `${fallbackLabel}: ${parsed.error.message}` : `${fallbackLabel}: ${text.substring(0, 300)}`;
+  }
+
+  // Google returns one entry per rejected operation; each is independently
+  // actionable, so report them all rather than only the first.
+  return failures
+    .slice(0, 3)
+    .map((e) => {
+      // errorCode is a one-key object, e.g. { adError: 'INVALID_FINAL_URL' } —
+      // the value names the exact rule and is what Google's docs are indexed by.
+      const rule = Object.values(e.errorCode || {})[0];
+      const field = (e.location?.fieldPathElements || [])
+        .map((p) => p.fieldName)
+        .filter(Boolean)
+        .join('.');
+      return [e.message || 'Rejected by Google Ads', rule && `(${rule})`, field && `— field: ${field}`]
+        .filter(Boolean)
+        .join(' ');
+    })
+    .join(' | ');
+}
+
 async function workerMutate(customerId, operations, refreshToken, loginCustomerId) {
   const url = `${WORKER_BASE}/customers/${customerId}/googleAds:mutate`;
   const headers = {
@@ -326,7 +368,7 @@ async function workerMutate(customerId, operations, refreshToken, loginCustomerI
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Worker mutate ${response.status}: ${text.substring(0, 500)}`);
+    throw new Error(describeGoogleAdsError(text, `Google Ads rejected this (${response.status})`));
   }
 
   return response.json();

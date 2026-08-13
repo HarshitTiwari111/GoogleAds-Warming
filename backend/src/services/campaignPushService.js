@@ -97,7 +97,7 @@ async function pushKeyword(keywordDoc, target, cache) {
     return { syncState: 'synced', googleResourceName: resourceName, syncError: null };
   } catch (err) {
     logger.error(`[PUSH] Keyword "${keywordDoc.keyword}" failed: ${err.message}`);
-    return { syncState: 'failed', syncError: err.message.slice(0, 300), googleResourceName: null };
+    return { syncState: 'failed', syncError: err.message.slice(0, 600), googleResourceName: null };
   }
 }
 
@@ -126,7 +126,7 @@ async function pushAd(adDoc, target, cache) {
     return { syncState: 'synced', googleResourceName: resourceName || null, syncError: null };
   } catch (err) {
     logger.error(`[PUSH] Ad copy "${adDoc.headline1}" failed: ${err.message}`);
-    return { syncState: 'failed', syncError: err.message.slice(0, 300), googleResourceName: null };
+    return { syncState: 'failed', syncError: err.message.slice(0, 600), googleResourceName: null };
   }
 }
 

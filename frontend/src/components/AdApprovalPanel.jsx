@@ -1,15 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
-import { campaignsApi, unwrap } from '../services/api';
-
-// Google's approval vocabulary, translated to what it means for the operator.
-const APPROVAL = {
-  APPROVED: { label: 'Approved', pill: 'pill-success', icon: <CheckCircle2 size={13} /> },
-  APPROVED_LIMITED: { label: 'Approved (limited)', pill: 'pill-warning', icon: <AlertTriangle size={13} /> },
-  AREA_OF_INTEREST_ONLY: { label: 'Limited reach', pill: 'pill-warning', icon: <AlertTriangle size={13} /> },
-  DISAPPROVED: { label: 'Disapproved', pill: 'pill-error', icon: <AlertTriangle size={13} /> },
-  UNKNOWN: { label: 'Under review', pill: 'pill-neutral', icon: <Clock size={13} /> },
-};
+import { RefreshCw } from 'lucide-react';
+import ApprovalBadge from './ApprovalBadge';
 
 /**
  * What Google itself says about this campaign's ads.
@@ -18,44 +8,12 @@ const APPROVAL = {
  * that never leaves review usually has a reason Google already reports, and
  * the most common one is that the account has no approved billing, in which
  * case the ad will never serve however long the review runs.
+ *
+ * The status itself is fetched by the page (via useAdApprovalStatus) and passed
+ * in, because the same data also drives the badge on each ad card.
  */
-const POLL_MS = 60000;
-
-export default function AdApprovalPanel({ campaignId }) {
-  const [data, setData] = useState(null);
-  const [message, setMessage] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [checkedAt, setCheckedAt] = useState(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    return campaignsApi
-      .adStatus(campaignId)
-      .then((res) => {
-        setData(unwrap(res));
-        setMessage(res.success ? null : res.message);
-        setCheckedAt(new Date());
-      })
-      .catch((err) => setMessage(err.response?.data?.message || err.message))
-      .finally(() => setLoading(false));
-  }, [campaignId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Google decides when an ad is approved; all this does is notice promptly.
-  // Polling stops once nothing is awaiting a verdict, so a settled campaign
-  // isn't queried forever.
-  const awaitingVerdict = (data?.ads || []).some(
-    (a) => a.approvalStatus === 'UNKNOWN' || a.reviewStatus === 'UNDER_REVIEW' || a.reviewStatus === 'REVIEW_IN_PROGRESS'
-  );
-
-  useEffect(() => {
-    if (!awaitingVerdict) return undefined;
-    const id = setInterval(load, POLL_MS);
-    return () => clearInterval(id);
-  }, [awaitingVerdict, load]);
+export default function AdApprovalPanel({ status }) {
+  const { data, message, loading, checkedAt, awaitingVerdict, reload } = status;
 
   // Nothing useful to say yet — stay out of the way rather than show an empty box.
   if (loading && !data) return null;
@@ -78,7 +36,7 @@ export default function AdApprovalPanel({ campaignId }) {
           <h3>Google Ads status</h3>
           <span className="subtitle">What Google reports for this campaign&apos;s ads</span>
         </div>
-        <button className="btn-secondary" onClick={load} disabled={loading}>
+        <button className="btn-secondary" onClick={reload} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'set-spin' : undefined} /> Refresh
         </button>
       </div>
@@ -117,23 +75,16 @@ export default function AdApprovalPanel({ campaignId }) {
               </tr>
             </thead>
             <tbody>
-              {ads.map((ad) => {
-                const a = APPROVAL[ad.approvalStatus] || APPROVAL.UNKNOWN;
-                return (
-                  <tr key={ad.adId}>
-                    <td>{ad.headlines[0] || `Ad ${ad.adId}`}</td>
-                    <td>
-                      <span className={`pill ${a.pill}`}>{a.icon} {a.label}</span>
-                    </td>
-                    <td className="cell-muted">{ad.status || '—'}</td>
-                    <td className="cell-sub">
-                      {ad.policyTopics.length
-                        ? ad.policyTopics.map((t) => t.topic).join(', ')
-                        : '—'}
-                    </td>
-                  </tr>
-                );
-              })}
+              {ads.map((ad) => (
+                <tr key={ad.adId}>
+                  <td>{ad.headlines[0] || `Ad ${ad.adId}`}</td>
+                  <td><ApprovalBadge ad={ad} /></td>
+                  <td className="cell-muted">{ad.status || '—'}</td>
+                  <td className="cell-sub">
+                    {ad.policyTopics.length ? ad.policyTopics.map((t) => t.topic).join(', ') : '—'}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

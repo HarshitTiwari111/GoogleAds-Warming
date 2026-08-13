@@ -4433,6 +4433,9 @@ tbody tr:hover td:first-child { background: var(--bg-subtle); }
 .adcopy-card-foot {
   display: flex;
   align-items: center;
+  /* Two badges plus the meta line and link overflow a narrow card, so let the
+     row wrap rather than squeeze the labels. */
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: auto;
   padding-top: 12px;
