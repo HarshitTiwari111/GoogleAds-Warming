@@ -617,20 +617,50 @@ async function fetchAdGroups(customerId, googleCampaignId, refreshToken, loginCu
 }
 
 /**
- * An ad group to attach keywords and ads to: the campaign's first existing
- * one, or a new one when the campaign has none. A campaign created outside
- * this app may legitimately have no ad group yet, and failing in that case
- * would block the operator for no good reason.
+ * The ad group name an ad belongs in, derived from its final URL's domain —
+ * `https://www.udemy.com/course/x` becomes `udemy.com`. Null when the URL
+ * isn't parseable, or when there is no URL at all (keywords).
  */
-async function resolveAdGroup(customerId, googleCampaignId, refreshToken, loginCustomerId) {
-  const existing = await fetchAdGroups(customerId, googleCampaignId, refreshToken, loginCustomerId);
-  if (existing.length) return existing[0].resourceName;
+function adGroupNameForUrl(finalUrl) {
+  if (!finalUrl) return null;
+  try {
+    return new URL(finalUrl).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
-  logger.info(`[PUSH] Campaign ${googleCampaignId} has no ad group — creating one`);
+/**
+ * An ad group to attach keywords and ads to.
+ *
+ * Ads are grouped by the website they point at, because Google's
+ * ONE_WEBSITE_PER_AD_GROUP policy disapproves any ad whose destination
+ * differs from the rest of its ad group. Putting every ad in the campaign's
+ * first ad group — which is what this did before — meant that adding ad
+ * copies for a second website silently got them rejected.
+ *
+ * Without a usable URL (keywords have none) this falls back to the first
+ * existing ad group, and creates one when the campaign has none: a campaign
+ * created outside this app may legitimately have no ad group yet, and failing
+ * in that case would block the operator for no good reason.
+ */
+async function resolveAdGroup(customerId, googleCampaignId, refreshToken, loginCustomerId, finalUrl) {
+  const existing = await fetchAdGroups(customerId, googleCampaignId, refreshToken, loginCustomerId);
+  const domain = adGroupNameForUrl(finalUrl);
+
+  if (!domain) {
+    if (existing.length) return existing[0].resourceName;
+  } else {
+    const match = existing.find((g) => g.name.toLowerCase() === domain);
+    if (match) return match.resourceName;
+  }
+
+  const name = domain || 'Ad Group 1';
+  logger.info(`[PUSH] Campaign ${googleCampaignId}: creating ad group "${name}"`);
   return googleAdsService.createAdGroup(
     customerId,
     `customers/${customerId}/campaigns/${googleCampaignId}`,
-    { name: 'Ad Group 1', cpcBidMicros: 500000 },
+    { name, cpcBidMicros: 500000 },
     { refreshToken },
     loginCustomerId
   );

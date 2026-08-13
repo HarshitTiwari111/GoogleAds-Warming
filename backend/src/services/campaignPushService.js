@@ -54,16 +54,23 @@ async function resolveTarget(campaign, reqUser) {
   };
 }
 
-/** Cache the ad group per campaign so a batch resolves it once, not per item. */
-async function getAdGroup(target, cache) {
-  const key = `${target.customerId}:${target.googleCampaignId}`;
+/**
+ * Cache the ad group so a batch resolves it once, not per item.
+ *
+ * Keyed by final URL as well as campaign, because ads for different websites
+ * must land in different ad groups — caching on the campaign alone would send
+ * the whole batch to whichever website happened to be pushed first.
+ */
+async function getAdGroup(target, cache, finalUrl) {
+  const key = `${target.customerId}:${target.googleCampaignId}:${finalUrl || ''}`;
   if (cache?.has(key)) return cache.get(key);
 
   const resource = await googleAdsService.resolveAdGroup(
     target.customerId,
     target.googleCampaignId,
     target.refreshToken,
-    target.loginCustomerId
+    target.loginCustomerId,
+    finalUrl
   );
   cache?.set(key, resource);
   return resource;
@@ -108,7 +115,9 @@ async function pushAd(adDoc, target, cache) {
   }
 
   try {
-    const adGroupResource = await getAdGroup(target, cache);
+    // Grouped by destination: Google disapproves an ad whose website differs
+    // from the rest of its ad group.
+    const adGroupResource = await getAdGroup(target, cache, adDoc.finalUrl);
 
     const resourceName = await googleAdsService.createResponsiveSearchAd(
       target.customerId,

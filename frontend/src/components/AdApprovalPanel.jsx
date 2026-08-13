@@ -2,6 +2,27 @@ import { RefreshCw } from 'lucide-react';
 import ApprovalBadge from './ApprovalBadge';
 
 /**
+ * What a policy topic means and who can act on it.
+ *
+ * Google reports these as bare constants — an operator reading
+ * "ONE_WEBSITE_PER_AD_GROUP" has no way to know whether it is something this
+ * dashboard got wrong or something they must fix in the Google Ads account,
+ * so each known topic says which.
+ */
+const POLICY_HELP = {
+  ONE_WEBSITE_PER_AD_GROUP:
+    'Every ad in one ad group must point to the same website. Ad copies are now split into an ad group per domain, but ads pushed before that fix stay disapproved — delete them here and push again to recreate them in the right ad group.',
+  EU_POLITICAL_ADS:
+    'Google requires each account to declare whether it runs political ads in the EU. Until that declaration is made the ads keep serving outside the EU but are limited inside it. Set it in Google Ads → Admin → Account settings → Political content.',
+  DESTINATION_NOT_WORKING:
+    'Google could not load the final URL. Check that the landing page opens without a redirect loop, login wall, or error.',
+  DESTINATION_MISMATCH:
+    'The display URL and the final URL point to different domains. They must match.',
+  TRADEMARKS_IN_AD_TEXT:
+    'The ad text uses a trademarked term. Either remove it or file a trademark authorisation with Google.',
+};
+
+/**
  * What Google itself says about this campaign's ads.
  *
  * Approval is Google's decision and this dashboard cannot hurry it — but an ad
@@ -28,6 +49,11 @@ export default function AdApprovalPanel({ status }) {
 
   const { ads = [], billing, adsError } = data;
   const billingMissing = billing && !billing.hasApprovedBilling;
+
+  // The distinct policies blocking any ad, so the same explanation isn't
+  // repeated once per ad that hit it.
+  const topics = [...new Set(ads.flatMap((ad) => (ad.policyTopics || []).map((t) => t.topic)))]
+    .filter((t) => POLICY_HELP[t]);
 
   return (
     <div className="panel-card approval-panel">
@@ -88,6 +114,17 @@ export default function AdApprovalPanel({ status }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {topics.length > 0 && (
+        <dl className="approval-policies">
+          {topics.map((t) => (
+            <div key={t}>
+              <dt>{t}</dt>
+              <dd>{POLICY_HELP[t]}</dd>
+            </div>
+          ))}
+        </dl>
       )}
 
       <p className="set-hint approval-note">
